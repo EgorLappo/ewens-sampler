@@ -1,9 +1,9 @@
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use clap::{Parser, Subcommand, ValueEnum};
-use color_eyre::eyre::{Result, WrapErr, bail};
+use color_eyre::eyre::{bail, Result, WrapErr};
 use indicatif::{ProgressIterator, ProgressStyle};
 use itertools::Itertools;
-use rand::{SeedableRng, rngs::SmallRng};
+use rand::{rngs::SmallRng, SeedableRng};
 use std::io::{ErrorKind, Read, Write};
 
 use ewens_sampler::sampler::{ConditionalCRPSampler, FellerSampler, FellerSamplerK, Sampler};
@@ -45,25 +45,15 @@ fn main() -> Result<()> {
                 sample(sampler, samples, seed, fmt, n)?;
             }
         }
-        Command::Test {
-            n,
-            k,
-            ref configuration,
-        } => test(configuration, n, k)?,
+        Command::Test { ref configuration } => test(configuration)?,
     }
 
     Ok(())
 }
 
 #[derive(Debug, Clone, Parser)]
-#[command(version, about = "Sample from Ewens distibution conditional on number of observed alleles.", long_about = None)]
+#[command(version, about = "a ewens distribution utility", long_about = None)]
 struct Opts {
-    // #[arg(short, value_name = "N", help = "number of samples")]
-    // n: usize,
-    // #[arg(short, value_name = "K", help = "number of alleles")]
-    // k: usize,
-    // #[arg(value_enum, short, long="format", default_value_t = OutputFormat::Binary, help = "output format (tabular/binary)")]
-    // fmt: OutputFormat,
     #[command(subcommand)]
     command: Command,
 }
@@ -71,7 +61,7 @@ struct Opts {
 #[derive(Debug, Clone, PartialEq, Eq, ValueEnum)]
 enum OutputFormat {
     /// output as sequence of (native-endian) u16 values;
-    /// consume it in chunks to get configurations;
+    /// when reading, consume it in chunks to get configurations;
     /// chunk size is k if sampling with fixed k, or n if sampling from unconstrained Ewens distribution
     Binary,
     /// output as ASCII characters, space-separated, one configuration per line;
@@ -110,15 +100,13 @@ enum Command {
             help = "initial configuration to start sampling from, uses conditional CRP sampler"
         )]
         initial_configuration: Option<String>,
-        #[arg(value_enum, short='c', long="format", default_value_t = OutputFormat::Binary, help = "output format (tabular/binary, see README)")]
+        #[arg(value_enum, short='c', long="format", default_value_t = OutputFormat::Binary, help = "output format")]
         fmt: OutputFormat,
     },
     Test {
-        #[arg(short, value_name = "N", help = "number of samples")]
-        n: usize,
-        #[arg(short, value_name = "K", help = "number of alleles")]
-        k: usize,
-        #[arg(help = "configuration to run the 'exact test' on")]
+        #[arg(
+            help = "configuration to run the exact test on; a space-separated list of unsigned integers; must have `k` elements with values summing to `n`"
+        )]
         configuration: String,
     },
 }
@@ -163,7 +151,7 @@ fn sample(
     Ok(())
 }
 
-fn test(configuration: &str, n: usize, k: usize) -> Result<()> {
+fn test(configuration: &str) -> Result<()> {
     // parse the configuration
     //   the configuration is a list like "34 12 7 9 2 1 1" of length k and summing to n
     //   probability is proportional to 1/ the product of the values,
@@ -179,21 +167,8 @@ fn test(configuration: &str, n: usize, k: usize) -> Result<()> {
             )
         })?;
 
-    if uconf.len() != k {
-        bail!(
-            "provided configuration '{}' does not have k={} entries",
-            configuration,
-            k
-        );
-    }
-
-    if uconf.iter().sum::<u16>() != n as u16 {
-        bail!(
-            "entries of provided configuration '{}' do not sum to n={}",
-            configuration,
-            n
-        )
-    }
+    let k = uconf.len();
+    // let n = uconf.iter().sum::<u16>();
 
     // this is the -log P(c_0|k)
     let lp: f64 = uconf.into_iter().map(|x| (x as f64).ln()).sum();
@@ -202,8 +177,7 @@ fn test(configuration: &str, n: usize, k: usize) -> Result<()> {
     let stdin = std::io::stdin();
     let mut stdin = stdin.lock();
 
-    // we will try to process a lot of configurations at once per read
-    let buf_size = 2 * k;
+    let buf_size = 2 * k * 1000;
 
     let mut buf = vec![0; buf_size];
 
@@ -244,11 +218,6 @@ fn test(configuration: &str, n: usize, k: usize) -> Result<()> {
             }
         }
     }
-
-    // println!(
-    //     "tested {:?} samples, found {:?} passing configurations",
-    //     total, count
-    // );
 
     println!("{:?} {:?}", count, total);
     Ok(())
