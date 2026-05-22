@@ -1,5 +1,5 @@
-use crate::sampler::{Sampler, conditional_bernoulli_q, conditional_bernoulli_sample};
-use rand::Rng;
+use crate::sampler::{conditional_bernoulli_q, conditional_bernoulli_sample, Sampler};
+use rand::{Rng, RngExt};
 
 #[derive(Debug, Clone)]
 pub struct FellerSampler {

@@ -1,4 +1,4 @@
-use rand::Rng;
+use rand::{Rng, RngExt};
 
 pub mod crp;
 pub mod feller;
