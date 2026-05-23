@@ -240,6 +240,99 @@ impl Sampler for ConditionalCRPSampler {
     }
 }
 
+// the biased sampler here is trying to model
+// frequency dependence among restaurant-goers
+// when bias is = 1 we get neutral model exactly, only much slower
+// when bias > 1 (e.g. 1.1, 1.2, ...), customers prefer tables with more people
+// when bias < 1, customers prefer empti-er table (probability of occupying an empty table doesn't change)
+// mechanically, this is achieved by an adjustment to a table assignment rule,
+//   where it's not the frequency of people at the table that matters, but frequency^bias
+#[derive(Debug, Clone)]
+pub struct BiasedCRPSampler {
+    crp: ConditionalCRPSampler,
+    bias: f64,
+}
+
+impl BiasedCRPSampler {
+    pub fn new(
+        theta: f64,
+        n: usize,
+        k: usize,
+        bias: f64,
+        initial_configuration: &str,
+    ) -> Result<Self> {
+        let crp = ConditionalCRPSampler::new(theta, n, k, initial_configuration)?;
+        Ok(Self { crp, bias })
+    }
+}
+
+impl Sampler for BiasedCRPSampler {
+    fn sample<R: Rng>(&self, rng: &mut R) -> Vec<u16> {
+        // in the chinese restaurant process, the configuration is built
+        // sample-by sample
+
+        // assignment of samples to cycles
+        let mut configuration = self.crp.conf_init.clone();
+        let mut assignment = self.crp.assignment_init.clone();
+
+        // samples_assigned will index assignment (it has elements 0..samples_assigned filled in)
+        let mut samples_assigned = self.crp.n_init;
+        // cycle refers to most recently used cycle_id, zero-indexed, so do -1
+        let mut cycle = self.crp.k_init - 1;
+
+        // first deal with the case in which k == k_init,
+        // as then we don't even need to sample the zetas, they are all zero
+        if self.crp.k == self.crp.k_init {
+            // p here keeps track of the number of unassigned samples instead of zetas
+            for _ in 0..self.crp.p.len() {
+                let cycle_choice = choose_biased(&configuration, samples_assigned, self.bias, rng);
+                assignment[samples_assigned] = cycle_choice;
+
+                // increment configuration
+                configuration[cycle_choice] += 1;
+                samples_assigned += 1;
+            }
+        } else {
+            // otherwise, finish sampling the configuration as usual
+            let zetas = conditional_bernoulli_sample(
+                self.crp.k - self.crp.k_init,
+                &self.crp.p,
+                &self.crp.q,
+                rng,
+            );
+
+            for s in zetas.iter() {
+                if *s == 0 {
+                    // if s == 0, we must place
+                    // the sample in the same cycle as
+                    // a randomly chosen previous sample
+                    let cycle_choice =
+                        choose_biased(&configuration, samples_assigned, self.bias, rng);
+                    assignment[samples_assigned] = cycle_choice;
+
+                    // increment configuration
+                    configuration[cycle_choice] += 1;
+                } else {
+                    // if s == 1, we must start a new cycle
+                    cycle += 1;
+                    assignment[samples_assigned] = cycle;
+
+                    // increment configuration
+                    // here we fill a new element
+                    configuration.push(1);
+                    // configuration[cycle] += 1;
+                }
+
+                samples_assigned += 1;
+            }
+        }
+
+        configuration.sort_unstable();
+
+        configuration
+    }
+}
+
 fn conditional_crp_bernoulli_p(n_init: usize, n: usize, theta: f64) -> Box<[f64]> {
     // compute probabilities for the chinese restaurant process
     // p_j = theta / (theta + j - 1),
@@ -248,4 +341,27 @@ fn conditional_crp_bernoulli_p(n_init: usize, n: usize, theta: f64) -> Box<[f64]
     ((n_init + 1)..=n)
         .map(|j| theta / (theta + (j as f64) - 1.))
         .collect()
+}
+
+fn choose_biased<R: Rng>(xs: &[u16], l: usize, bias: f64, rng: &mut R) -> usize {
+    // compute frequencies and bias them
+    let biased_xs: Vec<f64> = xs
+        .iter()
+        .map(|x| (*x as f64 / l as f64).powf(bias))
+        .collect();
+    // get the norm
+    let norm: f64 = biased_xs.iter().sum();
+    // get a random value in [0, norm)
+    let r = rng.random::<f64>() * norm;
+    // find the right i
+    let mut i = 0;
+    let mut csum = 0.0;
+    for x in biased_xs {
+        csum += x;
+        if r < csum {
+            return i;
+        }
+        i += 1;
+    }
+    i
 }

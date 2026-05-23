@@ -6,7 +6,9 @@ use itertools::Itertools;
 use rand::{rngs::SmallRng, SeedableRng};
 use std::io::{ErrorKind, Read, Write};
 
-use ewens_sampler::sampler::{ConditionalCRPSampler, FellerSampler, FellerSamplerK, Sampler};
+use ewens_sampler::sampler::{
+    BiasedCRPSampler, ConditionalCRPSampler, FellerSampler, FellerSamplerK, Sampler,
+};
 
 fn main() -> Result<()> {
     color_eyre::install()?;
@@ -21,26 +23,43 @@ fn main() -> Result<()> {
             seed,
             theta,
             initial_configuration,
+            bias,
             fmt,
         } => {
             if let Some(k) = k {
                 // sample conditional on k
                 if let Some(ic) = initial_configuration {
                     // use crp if initial configuration provided
-                    let sampler = ConditionalCRPSampler::new(theta, n, k, &ic)?;
-                    sample(sampler, samples, seed, fmt, k)?;
+                    // and run the biased version if, well, bias is provided...
+                    if let Some(bias) = bias {
+                        let sampler = BiasedCRPSampler::new(theta, n, k, bias, &ic)?;
+                        sample(sampler, samples, seed, fmt, k)?;
+                    } else {
+                        let sampler = ConditionalCRPSampler::new(theta, n, k, &ic)?;
+                        sample(sampler, samples, seed, fmt, k)?;
+                    }
                 } else {
-                    // use feller otherwise
-                    let sampler = FellerSamplerK::new(theta, n, k);
-                    sample(sampler, samples, seed, fmt, k)?;
-                }
+                    // if bias given, fallback on the (slow) biased CRP with empy IC
+                    if let Some(bias) = bias {
+                        let sampler = BiasedCRPSampler::new(theta, n, k, bias, &String::new())?;
+                        sample(sampler, samples, seed, fmt, k)?;
+                    } else {
+                        // use conditional feller otherwise
+                        let sampler = FellerSamplerK::new(theta, n, k);
+                        sample(sampler, samples, seed, fmt, k)?;
+                    }
+                };
             } else {
-                // sample unconditionally
                 if initial_configuration.is_some() {
                     bail!(
                         "please provide value of 'k' for sampling with fixed initial configuration!"
                     )
                 }
+                if bias.is_some() {
+                    bail!("please provide value of 'k' for biased sampling")
+                }
+
+                // otherwise, sample unconditionally
                 let sampler = FellerSampler::new(theta, n);
                 sample(sampler, samples, seed, fmt, n)?;
             }
@@ -100,6 +119,8 @@ enum Command {
             help = "initial configuration to start sampling from, uses conditional CRP sampler"
         )]
         initial_configuration: Option<String>,
+        #[arg(short, long, help = "frequency-dependent bias factor")]
+        bias: Option<f64>,
         #[arg(value_enum, short='c', long="format", default_value_t = OutputFormat::Binary, help = "output format")]
         fmt: OutputFormat,
     },

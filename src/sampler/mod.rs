@@ -3,9 +3,10 @@ use rand::{Rng, RngExt};
 pub mod crp;
 pub mod feller;
 
-pub use crp::{CRPSamplerK, ConditionalCRPSampler};
+pub use crp::{BiasedCRPSampler, CRPSamplerK, ConditionalCRPSampler};
 pub use feller::{FellerSampler, FellerSamplerK};
 
+// sample configurations from the ewens distribution
 pub trait Sampler {
     fn sample<R: Rng>(&self, rng: &mut R) -> Vec<u16>;
 }
