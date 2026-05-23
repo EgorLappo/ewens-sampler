@@ -101,16 +101,21 @@ pub struct ConditionalCRPSampler {
 
 impl ConditionalCRPSampler {
     pub fn new(theta: f64, n: usize, k: usize, initial_configuration: &str) -> Result<Self> {
-        let conf_init = initial_configuration
-            .split(' ')
-            .map(|s| s.parse::<u16>())
-            .collect::<Result<Vec<_>, _>>()
-            .wrap_err_with(|| {
-                format!(
-                    "failed while parsing configuration {:?} into unsigned integers",
-                    initial_configuration
-                )
-            })?;
+        let conf_init = if initial_configuration.is_empty() {
+            // empty initial configuration means we sample as usual
+            Vec::new()
+        } else {
+            initial_configuration
+                .split(' ')
+                .map(|s| s.parse::<u16>())
+                .collect::<Result<Vec<_>, _>>()
+                .wrap_err_with(|| {
+                    format!(
+                        "failed while parsing configuration {:?} into unsigned integers",
+                        initial_configuration
+                    )
+                })?
+        };
 
         let k_init = conf_init.len();
         let n_init = conf_init.iter().sum::<u16>() as usize;
