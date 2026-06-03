@@ -64,7 +64,13 @@ fn main() -> Result<()> {
                 sample(sampler, samples, seed, fmt, n)?;
             }
         }
-        Command::Test { ref configuration } => test(configuration)?,
+        Command::Test {
+            kind,
+            ref configuration,
+        } => match kind {
+            TestKind::Slatkin => slatkin_test(configuration)?,
+            TestKind::Watterson => watterson_test(configuration)?,
+        },
     }
 
     Ok(())
@@ -85,6 +91,14 @@ enum OutputFormat {
     Binary,
     /// output as ASCII characters, space-separated, one configuration per line;
     Tabular,
+}
+
+#[derive(Debug, Copy, Clone, ValueEnum)]
+enum TestKind {
+    /// Slatkin's exact test based on the Ewens distribution
+    Slatkin,
+    /// Watterson's homozygosity test
+    Watterson,
 }
 
 #[derive(Debug, Clone, Subcommand)]
@@ -125,6 +139,8 @@ enum Command {
         fmt: OutputFormat,
     },
     Test {
+        #[arg(value_enum, help = "test kind", value_name="KIND", default_value_t=TestKind::Slatkin)]
+        kind: TestKind,
         #[arg(
             help = "configuration to run the exact test on; a space-separated list of unsigned integers; must have `k` elements with values summing to `n`"
         )]
@@ -172,7 +188,7 @@ fn sample(
     Ok(())
 }
 
-fn test(configuration: &str) -> Result<()> {
+fn slatkin_test(configuration: &str) -> Result<()> {
     // parse the configuration
     //   the configuration is a list like "34 12 7 9 2 1 1" of length k and summing to n
     //   probability is proportional to 1/ the product of the values,
@@ -223,6 +239,70 @@ fn test(configuration: &str) -> Result<()> {
                     // now we want to test if P(c|k) <= P(c_0|k)
                     //   in -log-p, we test -log P(c|k) >= -log P(c_0|k)
                     if lp_c >= lp {
+                        count += 1
+                    }
+
+                    total += 1;
+                });
+            }
+
+            Err(ref e) if e.kind() == ErrorKind::UnexpectedEof => {
+                break;
+            }
+
+            Err(e) => {
+                bail!(e)
+            }
+        }
+    }
+
+    println!("{:?} {:?}", count, total);
+    Ok(())
+}
+
+fn watterson_test(configuration: &str) -> Result<()> {
+    // this works very similar to slatkin's test
+    let uconf = configuration
+        .split(' ')
+        .map(|s| s.parse::<u16>())
+        .collect::<Result<Vec<_>, _>>()
+        .wrap_err_with(|| {
+            format!(
+                "failed while parsing configuration {:?} into unsigned integers",
+                configuration
+            )
+        })?;
+
+    let k = uconf.len();
+
+    // unlike with slatkin, we just sum the squares of entries
+    let f_0: u16 = uconf.into_iter().map(|x| x * x).sum();
+
+    // now read the file from stdin as bytes
+    let stdin = std::io::stdin();
+    let mut stdin = stdin.lock();
+
+    let buf_size = 2 * k * 1000;
+
+    let mut buf = vec![0; buf_size];
+
+    let mut total: usize = 0;
+    let mut count: usize = 0;
+
+    loop {
+        match stdin.read_exact(&mut buf) {
+            Ok(_) => {
+                // iter over configurations
+                let chunks = buf.chunks_exact(2 * k);
+
+                chunks.for_each(|c| {
+                    let f_c: u16 = c
+                        .chunks_exact(2)
+                        .map(|x| LittleEndian::read_u16(x) as u16)
+                        .map(|x| x * x)
+                        .sum();
+
+                    if f_c <= f_0 {
                         count += 1
                     }
 
