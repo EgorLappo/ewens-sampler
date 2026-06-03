@@ -133,7 +133,11 @@ enum Command {
             help = "initial configuration to start sampling from, uses conditional CRP sampler"
         )]
         initial_configuration: Option<String>,
-        #[arg(short, long, help = "frequency-dependent bias factor")]
+        #[arg(
+            short,
+            long,
+            help = "frequency-dependent bias factor of restaurant tables (should not be used in typical analyses)"
+        )]
         bias: Option<f64>,
         #[arg(value_enum, short='c', long="format", default_value_t = OutputFormat::Binary, help = "output format")]
         fmt: OutputFormat,
