@@ -34,8 +34,6 @@ impl Sampler for FellerSampler {
             }
         }
 
-        configuration.sort_unstable();
-
         configuration
     }
 }
@@ -86,8 +84,6 @@ impl Sampler for FellerSamplerK {
                 i += 1;
             }
         }
-
-        configuration.sort_unstable();
 
         configuration
     }

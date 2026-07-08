@@ -1,9 +1,13 @@
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::hint::black_box;
 
-use ewens_sampler::sampler::*;
-use rand::{SeedableRng, rngs::SmallRng};
+use ewinfer::sampler::*;
+use rand::{rngs::SmallRng, SeedableRng};
 
+// this is a sanity check for implementations:
+// we still have to give the value of theta even when sampling conditional on (n,k)
+// we know this does not change the distribution, but
+// could it *possibly* affect speed?
 pub fn feller_theta_comparison_small(c: &mut Criterion) {
     // first test on small value (n,k) = (16,7)
     let (n, k) = (16, 7);
@@ -21,6 +25,13 @@ pub fn feller_theta_comparison_small(c: &mut Criterion) {
     group.finish();
 }
 
+// microbench the implementation of sampling conditional on (n, k) which in the main use-case
+// we want to say that feller is the faster one but CRP is much more extensible
+// and this looks to be true:
+// method_comparison/feller
+//      time:   [3.0760 µs 3.0831 µs 3.0951 µs]
+// method_comparison/crp
+//      time:   [3.4259 µs 3.4291 µs 3.4331 µs]
 pub fn feller_theta_comparison_large(c: &mut Criterion) {
     // then test on large value (n,k) = (265,81)
     let (n, k) = (265, 81);
@@ -53,6 +64,7 @@ pub fn feller_crp_comparison(c: &mut Criterion) {
     group.finish();
 }
 
+// straight up bench implementation of conditional feller sampler
 pub fn bench_feller(c: &mut Criterion) {
     let (n, k) = (265, 81);
     let mut rng = SmallRng::seed_from_u64(231);
@@ -61,6 +73,7 @@ pub fn bench_feller(c: &mut Criterion) {
     c.bench_function("feller", |b| b.iter(|| feller.sample(&mut rng)));
 }
 
+// staight up bench implementation of conditional CRP (Chinese restaurant process) sampler
 pub fn bench_crp(c: &mut Criterion) {
     let (n, k) = (265, 81);
     let mut rng = SmallRng::seed_from_u64(231);

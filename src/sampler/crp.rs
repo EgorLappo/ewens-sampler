@@ -67,10 +67,6 @@ impl Sampler for CRPSamplerK {
             }
         }
 
-        //let mut configuration = dbg!(configuration);
-
-        configuration.sort_unstable();
-
         configuration
     }
 }
@@ -231,8 +227,6 @@ impl Sampler for ConditionalCRPSampler {
             }
         }
 
-        configuration.sort_unstable();
-
         configuration
     }
 }
@@ -323,8 +317,6 @@ impl Sampler for BiasedCRPSampler {
                 samples_assigned += 1;
             }
         }
-
-        configuration.sort_unstable();
 
         configuration
     }

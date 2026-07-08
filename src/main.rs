@@ -181,7 +181,9 @@ fn sample(
         }
         OutputFormat::Tabular => {
             for _ in (0..samples).progress_with_style(style) {
-                let samp = sampler.sample(&mut rng);
+                let mut samp = sampler.sample(&mut rng);
+                // only sort when outputting in ASCII
+                samp.sort_unstable();
 
                 writeln!(stdout, "{}", samp.iter().format(" "))?;
             }
