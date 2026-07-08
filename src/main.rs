@@ -96,7 +96,7 @@ enum OutputFormat {
 
 #[derive(Debug, Copy, Clone, ValueEnum)]
 enum TestKind {
-    /// Slatkin's exact test based on the Ewens distribution
+    /// Slatkin's exact test
     Slatkin,
     /// Watterson's homozygosity test
     Watterson,
@@ -137,7 +137,7 @@ enum Command {
         #[arg(
             short,
             long,
-            help = "frequency-dependent bias factor of restaurant tables (should not be used in typical analyses)"
+            help = "frequency-dependent bias factor of restaurant tables (should not be used in most analyses)"
         )]
         bias: Option<f64>,
         #[arg(value_enum, short='c', long="format", default_value_t = OutputFormat::Binary, help = "output format")]

@@ -3,10 +3,10 @@
 Help messages:
 
 ```
-> ./ewens-sampler --help
+> ./ewinfer --help
 a ewens distribution utility
 
-Usage: ewens-sampler <COMMAND>
+Usage: ewinfer <COMMAND>
 
 Commands:
   sample  
@@ -19,8 +19,8 @@ Options:
 ```
 
 ```
-> ./ewens-sampler sample --help
-Usage: ewens-sampler sample [OPTIONS] -n <N> [SAMPLES]
+> ./ewinfer sample --help
+Usage: ewinfer sample [OPTIONS] -n <N> [SAMPLES]
 
 Arguments:
   [SAMPLES]
@@ -48,14 +48,14 @@ Options:
   -i, --initial-configuration <INITIAL_CONFIGURATION>
           initial configuration to start sampling from, uses conditional CRP sampler
 
+  -b, --bias <BIAS>
+          frequency-dependent bias factor of restaurant tables (should not be used in most analyses)
+
   -c, --format <FMT>
           output format
 
           Possible values:
-          - binary:  output as sequence of (native-endian) u16 values;
-                     when reading, consume it in chunks to get configurations;
-                     chunk size is k if sampling with fixed k,
-                       or n if sampling from unconstrained Ewens distribution
+          - binary:  output as sequence of (native-endian) u16 values; when reading, consume it in chunks to get configurations; chunk size is k if sampling with fixed k, or n if sampling from unconstrained Ewens distribution
           - tabular: output as ASCII characters, space-separated, one configuration per line;
           
           [default: binary]
@@ -65,14 +65,23 @@ Options:
 ```
 
 ```
-> ./ewens-sampler test --help
-Usage: ewens-sampler test <CONFIGURATION>
+> ./ewinfer test --help
+Usage: ewinfer test [KIND] <CONFIGURATION>
 
 Arguments:
-  <CONFIGURATION>  configuration to run the exact test on;
-                   a space-separated list of unsigned integers;
-                   must have `k` elements with values summing to `n`
+  [KIND]
+          test kind
+
+          Possible values:
+          - slatkin:   Slatkin's exact test
+          - watterson: Watterson's homozygosity test
+          
+          [default: slatkin]
+
+  <CONFIGURATION>
+          configuration to run the exact test on; a space-separated list of unsigned integers; must have `k` elements with values summing to `n`
 
 Options:
-  -h, --help  Print help
+  -h, --help
+          Print help (see a summary with '-h')
 ```
