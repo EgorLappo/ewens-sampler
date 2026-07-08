@@ -41,13 +41,12 @@ impl Sampler for CRPSamplerK {
         assignment[0] = 0;
 
         // variables to keep track of progress
-        let mut samples_assigned = 1;
         let mut cycle = 0;
 
         let mut configuration = vec![0; self.k];
         configuration[cycle] += 1;
 
-        for s in zetas.iter() {
+        for (samples_assigned, s) in (1..).zip(zetas.iter()) {
             if *s == 0 {
                 // if s == 0, we must place
                 // the sample in the same cycle as
@@ -66,8 +65,6 @@ impl Sampler for CRPSamplerK {
                 // increment configuration
                 configuration[cycle] += 1;
             }
-
-            samples_assigned += 1;
         }
 
         //let mut configuration = dbg!(configuration);
