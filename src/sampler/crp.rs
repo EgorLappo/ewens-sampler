@@ -177,8 +177,6 @@ impl Sampler for ConditionalCRPSampler {
 
         // samples_assigned will index assignment (it has elements 0..samples_assigned filled in)
         let mut samples_assigned = self.n_init;
-        // cycle refers to most recently used cycle_id, zero-indexed, so do -1
-        let mut cycle = self.k_init - 1;
 
         // first deal with the case in which k == k_init,
         // as then we don't even need to sample the zetas, they are all zero
@@ -211,13 +209,11 @@ impl Sampler for ConditionalCRPSampler {
                     configuration[cycle_choice] += 1;
                 } else {
                     // if s == 1, we must start a new cycle
-                    cycle += 1;
-                    assignment[samples_assigned] = cycle;
 
                     // increment configuration
                     // here we fill a new element
                     configuration.push(1);
-                    // configuration[cycle] += 1;
+                    assignment[samples_assigned] = configuration.len() - 1;
                 }
 
                 samples_assigned += 1;
@@ -265,8 +261,6 @@ impl Sampler for BiasedCRPSampler {
 
         // samples_assigned will index assignment (it has elements 0..samples_assigned filled in)
         let mut samples_assigned = self.crp.n_init;
-        // cycle refers to most recently used cycle_id, zero-indexed, so do -1
-        let mut cycle = self.crp.k_init - 1;
 
         // first deal with the case in which k == k_init,
         // as then we don't even need to sample the zetas, they are all zero
@@ -302,13 +296,11 @@ impl Sampler for BiasedCRPSampler {
                     configuration[cycle_choice] += 1;
                 } else {
                     // if s == 1, we must start a new cycle
-                    cycle += 1;
-                    assignment[samples_assigned] = cycle;
 
                     // increment configuration
                     // here we fill a new element
                     configuration.push(1);
-                    // configuration[cycle] += 1;
+                    assignment[samples_assigned] = configuration.len() - 1;
                 }
 
                 samples_assigned += 1;
