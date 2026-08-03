@@ -1,4 +1,4 @@
-use crate::sampler::{conditional_bernoulli_q, conditional_bernoulli_sample, Sampler};
+use crate::sampler::{conditional_bernoulli_probs, conditional_bernoulli_sample, Sampler};
 use color_eyre::eyre::{bail, Result, WrapErr};
 use rand::{Rng, RngExt};
 
@@ -7,30 +7,29 @@ pub struct CRPSamplerK {
     pub _theta: f64,
     pub n: usize,
     pub k: usize,
-    p: Box<[f64]>,
-    q: Box<[f64]>,
+    n_vars: usize,
+    probs: Box<[f64]>,
 }
 
 impl CRPSamplerK {
     pub fn new(theta: f64, n: usize, k: usize) -> Self {
+        // unconstrained probabilities for zeta
         let p = crp_bernoulli_p(n, theta);
-        let q = conditional_bernoulli_q(k - 1, &p)
-            .into_iter()
-            .flatten()
-            .collect();
+        // conditioned ones
+        let probs = conditional_bernoulli_probs(k - 1, &p);
         Self {
             _theta: theta,
             n,
             k,
-            p,
-            q,
+            n_vars: p.len(),
+            probs,
         }
     }
 }
 
 impl Sampler for CRPSamplerK {
     fn sample<R: Rng>(&self, rng: &mut R) -> Vec<u16> {
-        let zetas = conditional_bernoulli_sample(self.k - 1, &self.p, &self.q, rng);
+        let zetas = conditional_bernoulli_sample(self.n_vars, self.k - 1, &self.probs, rng);
 
         // in the chinese restaurant process, the configuration is built
         // sample-by sample
@@ -84,8 +83,8 @@ pub struct ConditionalCRPSampler {
     pub _theta: f64,
     pub n: usize,
     pub k: usize,
-    p: Box<[f64]>,
-    q: Box<[f64]>,
+    n_vars: usize,
+    probs: Box<[f64]>,
     k_init: usize,
     n_init: usize,
     conf_init: Vec<u16>,
@@ -147,21 +146,18 @@ impl ConditionalCRPSampler {
 
         // thus only worry about sampling zeta_{n_init + 1} up to zeta_n
         // if k == k_init, this is an empty vector (all zetas will be zero)
-        let q = if k == k_init {
+        let probs = if k == k_init {
             Vec::new().into_boxed_slice()
         } else {
-            conditional_bernoulli_q(k - k_init, &p)
-                .into_iter()
-                .flatten()
-                .collect()
+            conditional_bernoulli_probs(k - k_init, &p)
         };
 
         Ok(ConditionalCRPSampler {
             _theta: theta,
             n,
             k,
-            p,
-            q,
+            n_vars: p.len(),
+            probs,
             n_init,
             k_init,
             conf_init,
@@ -188,7 +184,7 @@ impl Sampler for ConditionalCRPSampler {
         // as then we don't even need to sample the zetas, they are all zero
         if self.k == self.k_init {
             // p here keeps track of the number of unassigned samples instead of zetas
-            for _ in 0..self.p.len() {
+            for _ in 0..self.n_vars {
                 let choice = rng.random_range(..samples_assigned);
                 let cycle_choice = assignment[choice];
                 assignment[samples_assigned] = cycle_choice;
@@ -199,7 +195,8 @@ impl Sampler for ConditionalCRPSampler {
             }
         } else {
             // otherwise, finish sampling the configuration as usual
-            let zetas = conditional_bernoulli_sample(self.k - self.k_init, &self.p, &self.q, rng);
+            let zetas =
+                conditional_bernoulli_sample(self.n_vars, self.k - self.k_init, &self.probs, rng);
 
             for s in zetas.iter() {
                 if *s == 0 {
@@ -275,7 +272,7 @@ impl Sampler for BiasedCRPSampler {
         // as then we don't even need to sample the zetas, they are all zero
         if self.crp.k == self.crp.k_init {
             // p here keeps track of the number of unassigned samples instead of zetas
-            for _ in 0..self.crp.p.len() {
+            for _ in 0..self.crp.n_vars {
                 let cycle_choice = choose_biased(&configuration, samples_assigned, self.bias, rng);
                 assignment[samples_assigned] = cycle_choice;
 
@@ -286,9 +283,9 @@ impl Sampler for BiasedCRPSampler {
         } else {
             // otherwise, finish sampling the configuration as usual
             let zetas = conditional_bernoulli_sample(
+                self.crp.n_vars,
                 self.crp.k - self.crp.k_init,
-                &self.crp.p,
-                &self.crp.q,
+                &self.crp.probs,
                 rng,
             );
 

@@ -1,4 +1,4 @@
-use crate::sampler::{conditional_bernoulli_q, conditional_bernoulli_sample, Sampler};
+use crate::sampler::{conditional_bernoulli_probs, conditional_bernoulli_sample, Sampler};
 use rand::{Rng, RngExt};
 
 #[derive(Debug, Clone)]
@@ -43,30 +43,29 @@ pub struct FellerSamplerK {
     pub _theta: f64,
     pub _n: usize,
     pub k: usize,
-    p: Box<[f64]>,
-    q: Box<[f64]>,
+    n_vars: usize,
+    probs: Box<[f64]>,
 }
 
 impl FellerSamplerK {
     pub fn new(theta: f64, n: usize, k: usize) -> Self {
+        // original unconstrained probabitities
         let p = feller_bernoulli_p(n, theta);
-        let q = conditional_bernoulli_q(k - 1, &p)
-            .into_iter()
-            .flatten()
-            .collect();
+        // conditioned ones
+        let probs = conditional_bernoulli_probs(k - 1, &p);
         Self {
             _theta: theta,
             _n: n,
             k,
-            p,
-            q,
+            n_vars: p.len(),
+            probs,
         }
     }
 }
 
 impl Sampler for FellerSamplerK {
     fn sample<R: Rng>(&self, rng: &mut R) -> Vec<u16> {
-        let zetas = conditional_bernoulli_sample(self.k - 1, &self.p, &self.q, rng);
+        let zetas = conditional_bernoulli_sample(self.n_vars, self.k - 1, &self.probs, rng);
 
         // in feller coupling, the configuration is defined
         // by looking at spacings between 1s in `samp`
