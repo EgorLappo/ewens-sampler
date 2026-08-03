@@ -12,6 +12,7 @@ indicatif = "0.18.0"
 itertools = "0.14.0"
 log = "0.4.28"
 rand = { version = "0.10.1" }
+rand_pcg = "0.10.2"
 serde = { version = "1.0.228", features = ["derive"] }
 
 [dev-dependencies]

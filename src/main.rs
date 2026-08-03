@@ -3,7 +3,8 @@ use clap::{Parser, Subcommand, ValueEnum};
 use color_eyre::eyre::{bail, Result};
 use indicatif::{ProgressIterator, ProgressStyle};
 use itertools::Itertools;
-use rand::{rngs::SmallRng, SeedableRng};
+use rand::SeedableRng;
+use rand_pcg::Pcg64;
 use std::io::Write;
 
 use ewinfer::sampler::{
@@ -160,7 +161,7 @@ fn sample(
     format: OutputFormat,
     slen: usize,
 ) -> Result<()> {
-    let mut rng = SmallRng::seed_from_u64(seed);
+    let mut rng = Pcg64::seed_from_u64(seed);
     let mut stdout = std::io::stdout();
 
     let style = ProgressStyle::with_template(
