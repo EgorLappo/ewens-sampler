@@ -102,7 +102,13 @@ pub fn watterson_test(configuration: &str) -> Result<()> {
     let k = uconf.len();
 
     // unlike with slatkin, we just sum the squares of entries
-    let f_0: u16 = uconf.into_iter().map(|x| x * x).sum();
+    let f_0: usize = uconf
+        .into_iter()
+        .map(|x| {
+            let x = x as usize;
+            x * x
+        })
+        .sum();
 
     // now read the file from stdin as bytes
     let stdin = std::io::stdin();
@@ -122,10 +128,13 @@ pub fn watterson_test(configuration: &str) -> Result<()> {
                 let chunks = buf.chunks_exact(2 * k);
 
                 chunks.for_each(|c| {
-                    let f_c: u16 = c
+                    let f_c: usize = c
                         .chunks_exact(2)
                         .map(LittleEndian::read_u16)
-                        .map(|x| x * x)
+                        .map(|x| {
+                            let x = x as usize;
+                            x * x
+                        })
                         .sum();
 
                     if f_c <= f_0 {
