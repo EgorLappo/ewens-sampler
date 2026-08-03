@@ -106,7 +106,7 @@ enum TestKind {
 #[derive(Debug, Clone, Subcommand)]
 enum Command {
     Sample {
-        #[arg(short, value_name = "N", help = "number of samples")]
+        #[arg(short, value_name = "N", help = "number of sampled alleles")]
         n: usize,
         #[arg(
             short,
@@ -115,6 +115,7 @@ enum Command {
         )]
         k: Option<usize>,
         #[arg(
+            value_name = "REPLICATES",
             default_value_t = 100,
             help = "number of sampled configurations to generate"
         )]
