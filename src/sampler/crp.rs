@@ -1,5 +1,5 @@
-use crate::sampler::{Sampler, conditional_bernoulli_probs, conditional_bernoulli_sample};
-use color_eyre::eyre::{Result, WrapErr, bail};
+use crate::sampler::{conditional_bernoulli_probs, conditional_bernoulli_sample, Sampler};
+use color_eyre::eyre::{bail, Result, WrapErr};
 use rand::{Rng, RngExt};
 use rand_pcg::Pcg64;
 
@@ -235,7 +235,8 @@ impl Sampler for ConditionalCRPSampler {
 #[derive(Debug, Clone)]
 pub struct BiasedCRPSampler {
     crp: ConditionalCRPSampler,
-    bias: f64,
+    // caches x^bias for integer x=0..=n
+    pow_cache: Box<[f64]>,
 }
 
 impl BiasedCRPSampler {
@@ -246,8 +247,12 @@ impl BiasedCRPSampler {
         bias: f64,
         initial_configuration: &str,
     ) -> Result<Self> {
+        if bias <= 0.0 || bias.is_infinite() {
+            bail!(format!("invalid bias value {bias:?}. must be > 0"));
+        }
         let crp = ConditionalCRPSampler::new(theta, n, k, initial_configuration)?;
-        Ok(Self { crp, bias })
+        let pow_cache = (0..=n).map(|x| (x as f64).powf(bias)).collect();
+        Ok(Self { crp, pow_cache })
     }
 }
 
@@ -268,7 +273,7 @@ impl Sampler for BiasedCRPSampler {
         if self.crp.k == self.crp.k_init {
             // p here keeps track of the number of unassigned samples instead of zetas
             for _ in 0..self.crp.n_vars {
-                let cycle_choice = choose_biased(&configuration, samples_assigned, self.bias, rng);
+                let cycle_choice = choose_biased(&configuration, &self.pow_cache, rng);
                 assignment[samples_assigned] = cycle_choice;
 
                 // increment configuration
@@ -289,8 +294,7 @@ impl Sampler for BiasedCRPSampler {
                     // if s == 0, we must place
                     // the sample in the same cycle as
                     // a randomly chosen previous sample
-                    let cycle_choice =
-                        choose_biased(&configuration, samples_assigned, self.bias, rng);
+                    let cycle_choice = choose_biased(&configuration, &self.pow_cache, rng);
                     assignment[samples_assigned] = cycle_choice;
 
                     // increment configuration
@@ -322,25 +326,22 @@ fn conditional_crp_bernoulli_p(n_init: usize, n: usize, theta: f64) -> Box<[f64]
         .collect()
 }
 
-fn choose_biased<R: Rng>(xs: &[u16], l: usize, bias: f64, rng: &mut R) -> usize {
-    // compute frequencies and bias them
-    let biased_xs: Vec<f64> = xs
-        .iter()
-        .map(|x| (*x as f64 / l as f64).powf(bias))
-        .collect();
+fn choose_biased<R: Rng>(xs: &[u16], pow: &[f64], rng: &mut R) -> usize {
     // get the norm
-    let norm: f64 = biased_xs.iter().sum();
+    let mut norm = 0.0;
+    for &x in xs {
+        norm += pow[x as usize];
+    }
+
     // get a random value in [0, norm)
     let r = rng.random::<f64>() * norm;
-    // find the right i
-    let mut i = 0;
     let mut csum = 0.0;
-    for x in biased_xs {
-        csum += x;
+    for (i, &x) in xs.iter().enumerate() {
+        // access cached bias frequencies directly
+        csum += pow[x as usize];
         if r < csum {
             return i;
         }
-        i += 1;
     }
-    i
+    xs.len() - 1
 }
