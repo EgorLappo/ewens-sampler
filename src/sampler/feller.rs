@@ -1,5 +1,6 @@
 use crate::sampler::{conditional_bernoulli_probs, conditional_bernoulli_sample, Sampler};
-use rand::{Rng, RngExt};
+use rand::RngExt;
+use rand_pcg::Pcg64;
 
 #[derive(Debug, Clone)]
 pub struct FellerSampler {
@@ -16,7 +17,7 @@ impl FellerSampler {
 }
 
 impl Sampler for FellerSampler {
-    fn sample<R: Rng>(&self, rng: &mut R) -> Vec<u16> {
+    fn sample(&self, rng: &mut Pcg64) -> Vec<u16> {
         // in feller coupling, the configuration is defined
         // by looking at spacings between 1s in `samp`
 
@@ -64,7 +65,7 @@ impl FellerSamplerK {
 }
 
 impl Sampler for FellerSamplerK {
-    fn sample<R: Rng>(&self, rng: &mut R) -> Vec<u16> {
+    fn sample(&self, rng: &mut Pcg64) -> Vec<u16> {
         let zetas = conditional_bernoulli_sample(self.n_vars, self.k - 1, &self.probs, rng);
 
         // in feller coupling, the configuration is defined

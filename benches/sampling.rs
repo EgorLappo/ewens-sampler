@@ -1,8 +1,8 @@
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 
 use ewinfer::sampler::*;
-use rand::{rngs::SmallRng, SeedableRng};
+use rand::{SeedableRng, rngs::SmallRng};
 
 // this is a sanity check for implementations:
 // we still have to give the value of theta even when sampling conditional on (n,k)
