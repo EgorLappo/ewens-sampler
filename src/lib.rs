@@ -1,4 +1,4 @@
-use color_eyre::{eyre::bail, eyre::WrapErr, Result};
+use color_eyre::{Result, eyre::WrapErr, eyre::bail};
 use itertools::Itertools;
 
 pub mod sampler;

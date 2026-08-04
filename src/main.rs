@@ -11,6 +11,7 @@ use ewinfer::sampler::{
     BiasedCRPSampler, ConditionalCRPSampler, FellerSampler, FellerSamplerK, Sampler,
 };
 use ewinfer::stats::{SlatkinTest, Test, WattersonTest};
+use ewinfer::theta::theta_mle;
 
 const PROGRESS_STYLE: &str =
     "{spinner:.purple} [{elapsed}/{duration}] [{bar:.cyan/blue}] {human_pos}/{human_len}";
@@ -22,48 +23,84 @@ fn main() -> Result<()> {
 
     // first, will we test or sample?
     if let Some(tc) = opts.test {
-        // TODO: implement theta choice here
-        let theta = opts.theta;
         let n = tc.n();
         let k = tc.k();
 
         // do we have an initial configuration or not
         if let Some(ic) = opts.initial_configuration {
+            let n0 = ic.n();
+            let k0 = ic.k();
+            let theta = theta_mle(n, k, Some((n0, k0)));
             // do we have nontrivial bias requested?
             if let Some(bias) = opts.bias
                 && bias != 1.0
             {
                 // use biased CRP
                 let sampler = BiasedCRPSampler::new(theta, n, k, bias, Some(&ic))?;
-                run_test(sampler, tc, opts.samples, opts.seed, opts.json, opts.quiet, Some(&ic))?;
+                run_test(
+                    sampler,
+                    tc,
+                    opts.samples,
+                    opts.seed,
+                    opts.json,
+                    opts.quiet,
+                    Some(&ic),
+                )?;
             } else {
                 // just use CRP
                 let sampler = ConditionalCRPSampler::new(theta, n, k, Some(&ic))?;
-                run_test(sampler, tc, opts.samples, opts.seed, opts.json, opts.quiet, Some(&ic))?;
+                run_test(
+                    sampler,
+                    tc,
+                    opts.samples,
+                    opts.seed,
+                    opts.json,
+                    opts.quiet,
+                    Some(&ic),
+                )?;
             }
         } else {
+            let theta = theta_mle(n, k, None);
             // do we have nontrivial bias requested?
             if let Some(bias) = opts.bias
                 && bias != 1.0
             {
                 // here ic is empty
                 let sampler = BiasedCRPSampler::new(theta, n, k, bias, None)?;
-                run_test(sampler, tc, opts.samples, opts.seed, opts.json, opts.quiet, None)?;
+                run_test(
+                    sampler,
+                    tc,
+                    opts.samples,
+                    opts.seed,
+                    opts.json,
+                    opts.quiet,
+                    None,
+                )?;
             } else {
                 // if not, just sample with Feller again
                 let sampler = FellerSamplerK::new(theta, n, k)?;
-                run_test(sampler, tc, opts.samples, opts.seed, opts.json, opts.quiet, None)?;
+                run_test(
+                    sampler,
+                    tc,
+                    opts.samples,
+                    opts.seed,
+                    opts.json,
+                    opts.quiet,
+                    None,
+                )?;
             }
         }
     } else {
         // if we are just sampling, is it fixed k or not?
         if let Some(k) = opts.k {
-            // TODO: implement theta choice here
-            let theta = opts.theta;
             let n = opts.n.unwrap();
 
             // if fixed k, do we have an initial configuration or not
             if let Some(ic) = opts.initial_configuration {
+                let n0 = ic.n();
+                let k0 = ic.k();
+                let theta = theta_mle(n, k, Some((n0, k0)));
+
                 // do we have nontrivial bias requested?
                 if let Some(bias) = opts.bias
                     && bias != 1.0
@@ -77,6 +114,7 @@ fn main() -> Result<()> {
                     run_sampler(sampler, opts.samples, opts.seed, opts.quiet)?;
                 }
             } else {
+                let theta = theta_mle(n, k, None);
                 // do we have nontrivial bias requested?
                 if let Some(bias) = opts.bias
                     && bias != 1.0
@@ -94,14 +132,13 @@ fn main() -> Result<()> {
             // without fixed k we just use Feller sampler,
             // and n, theta should be enforced by clap
             let n = opts.n.unwrap();
-            let theta = opts.theta;
+            let theta = opts.theta.unwrap();
 
             let sampler = FellerSampler::new(theta, n);
             run_sampler(sampler, opts.samples, opts.seed, opts.quiet)?;
         }
     }
 
- 
     Ok(())
 }
 
@@ -141,11 +178,10 @@ struct Opts {
         short,
         long,
         value_name = "THETA",
-        default_value_t = 1.0,
         help = "value of theta (doesn't affect the results when k is fixed)",
         required_unless_present("conditional") // don't need theta if have conditional sampling
     )]
-    theta: f64,
+    theta: Option<f64>,
     #[arg(
         short,
         long = "initial-configuration",
@@ -218,7 +254,7 @@ fn run_test(
     seed: u64,
     json: bool,
     quiet: bool,
-    ic: Option<&Configuration>
+    ic: Option<&Configuration>,
 ) -> Result<()> {
     let mut rng = Pcg64::seed_from_u64(seed);
 
@@ -266,9 +302,10 @@ fn run_test(
     if json {
         let val = serde_json::json!({
             "configuration": test_configuration.to_string(),
-           "seed": seed,
-           "replicates": samples,
-           "tests": [
+            "theta": sampler.theta(),
+            "seed": seed,
+            "replicates": samples,
+            "tests": [
                {
                    "test": s.name(),
                    "tail_count": s_total,
@@ -281,7 +318,7 @@ fn run_test(
                    "total_count": samples,
                    "p_tail": w_ptail,
                }
-           ]
+            ]
         });
 
         let string = serde_json::to_string(&val)?;
@@ -293,6 +330,7 @@ fn run_test(
         if let Some(ic) = ic {
             println!("initial configuration\t'{}'", ic);
         }
+        println!("theta\t{}", sampler.theta());
 
         println!("{}\ttail_count \t{}", s.name(), s_total);
         println!("{}\ttotal_count\t{}", s.name(), samples);

@@ -8,7 +8,7 @@ use rand_pcg::Pcg64;
 
 #[derive(Debug, Clone)]
 pub struct CRPSamplerK {
-    pub _theta: f64,
+    pub theta: f64,
     pub n: usize,
     pub k: usize,
     n_vars: usize,
@@ -22,7 +22,7 @@ impl CRPSamplerK {
         // conditioned ones
         let probs = conditional_bernoulli_probs(k - 1, &p);
         Self {
-            _theta: theta,
+            theta,
             n,
             k,
             n_vars: p.len(),
@@ -72,6 +72,10 @@ impl Sampler for CRPSamplerK {
 
         configuration
     }
+
+    fn theta(&self) -> f64 {
+        self.theta
+    }
 }
 
 fn crp_bernoulli_p(n: usize, theta: f64) -> Box<[f64]> {
@@ -84,7 +88,7 @@ fn crp_bernoulli_p(n: usize, theta: f64) -> Box<[f64]> {
 
 #[derive(Debug, Clone)]
 pub struct ConditionalCRPSampler {
-    pub _theta: f64,
+    pub theta: f64,
     pub n: usize,
     pub k: usize,
     n_vars: usize,
@@ -156,7 +160,7 @@ impl ConditionalCRPSampler {
         };
 
         Ok(ConditionalCRPSampler {
-            _theta: theta,
+            theta,
             n,
             k,
             n_vars: p.len(),
@@ -224,6 +228,10 @@ impl Sampler for ConditionalCRPSampler {
         }
 
         configuration
+    }
+
+    fn theta(&self) -> f64 {
+        self.theta
     }
 }
 
@@ -319,6 +327,10 @@ impl Sampler for BiasedCRPSampler {
         }
 
         configuration
+    }
+
+    fn theta(&self) -> f64 {
+        self.crp.theta
     }
 }
 

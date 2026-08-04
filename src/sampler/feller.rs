@@ -38,11 +38,15 @@ impl Sampler for FellerSampler {
 
         configuration
     }
+
+    fn theta(&self) -> f64 {
+        self.theta
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct FellerSamplerK {
-    pub _theta: f64,
+    pub theta: f64,
     pub _n: usize,
     pub k: usize,
     n_vars: usize,
@@ -60,7 +64,7 @@ impl FellerSamplerK {
         // conditioned ones
         let probs = conditional_bernoulli_probs(k - 1, &p);
         Ok(Self {
-            _theta: theta,
+            theta,
             _n: n,
             k,
             n_vars: p.len(),
@@ -91,6 +95,10 @@ impl Sampler for FellerSamplerK {
         }
 
         configuration
+    }
+
+    fn theta(&self) -> f64 {
+        self.theta
     }
 }
 
