@@ -1,4 +1,5 @@
 use crate::sampler::{conditional_bernoulli_probs, conditional_bernoulli_sample, Sampler};
+use color_eyre::{eyre::bail, Result};
 use rand::RngExt;
 use rand_pcg::Pcg64;
 
@@ -49,18 +50,22 @@ pub struct FellerSamplerK {
 }
 
 impl FellerSamplerK {
-    pub fn new(theta: f64, n: usize, k: usize) -> Self {
+    pub fn new(theta: f64, n: usize, k: usize) -> Result<Self> {
+        if k < 1 || k > n {
+            bail!("invalid parameters n={n}, k={k}. requires 1 <= k <= n");
+        }
+
         // original unconstrained probabitities
         let p = feller_bernoulli_p(n, theta);
         // conditioned ones
         let probs = conditional_bernoulli_probs(k - 1, &p);
-        Self {
+        Ok(Self {
             _theta: theta,
             _n: n,
             k,
             n_vars: p.len(),
             probs,
-        }
+        })
     }
 }
 

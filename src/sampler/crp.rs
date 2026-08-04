@@ -1,5 +1,8 @@
-use crate::sampler::{conditional_bernoulli_probs, conditional_bernoulli_sample, Sampler};
-use color_eyre::eyre::{bail, Result, WrapErr};
+use crate::{
+    sampler::{conditional_bernoulli_probs, conditional_bernoulli_sample, Sampler},
+    Configuration,
+};
+use color_eyre::eyre::{bail, Result};
 use rand::{Rng, RngExt};
 use rand_pcg::Pcg64;
 
@@ -93,43 +96,42 @@ pub struct ConditionalCRPSampler {
 }
 
 impl ConditionalCRPSampler {
-    pub fn new(theta: f64, n: usize, k: usize, initial_configuration: &str) -> Result<Self> {
-        let conf_init = if initial_configuration.is_empty() {
+    pub fn new(
+        theta: f64,
+        n: usize,
+        k: usize,
+        initial_configuration: Option<&Configuration>,
+    ) -> Result<Self> {
+        if k < 1 || k > n {
+            bail!("invalid parameters n={n}, k={k}. requires 1 <= k <= n");
+        }
+
+        let conf_init = if let Some(ic) = initial_configuration {
+            if k - ic.k() > n - ic.n() {
+                bail!(
+                    "provided initial configuration '{}' has  {}>k={} entries",
+                    ic,
+                    ic.k(),
+                    k
+                );
+            }
+
+            if ic.n() >= n {
+                bail!(
+                    "sum of entries of initial configuration '{}' is {}>=n={}",
+                    ic,
+                    ic.n(),
+                    n
+                )
+            }
+            ic.0.clone()
+        } else {
             // empty initial configuration means we sample as usual
             Vec::new()
-        } else {
-            initial_configuration
-                .split(' ')
-                .map(|s| s.parse::<u16>())
-                .collect::<Result<Vec<_>, _>>()
-                .wrap_err_with(|| {
-                    format!(
-                        "failed while parsing configuration {:?} into unsigned integers",
-                        initial_configuration
-                    )
-                })?
         };
 
         let k_init = conf_init.len();
         let n_init = conf_init.iter().sum::<u16>() as usize;
-
-        if k_init > k {
-            bail!(
-                "provided initial configuration '{}' has  {}>k={} entries",
-                initial_configuration,
-                k_init,
-                k
-            );
-        }
-
-        if n_init >= n {
-            bail!(
-                "sum of entries of initial configuration '{}' is {}>=n={}",
-                initial_configuration,
-                n_init,
-                n
-            )
-        }
 
         // reconstruct initial assignment as well
 
@@ -245,11 +247,15 @@ impl BiasedCRPSampler {
         n: usize,
         k: usize,
         bias: f64,
-        initial_configuration: &str,
+        initial_configuration: Option<&Configuration>,
     ) -> Result<Self> {
-        if bias <= 0.0 || bias.is_infinite() {
+        if bias <= 0.0 || !bias.is_finite() {
             bail!(format!("invalid bias value {bias:?}. must be > 0"));
         }
+        if k < 1 || k > n {
+            bail!("invalid parameters n={n}, k={k}. requires 1 <= k <= n");
+        }
+
         let crp = ConditionalCRPSampler::new(theta, n, k, initial_configuration)?;
         let pow_cache = (0..=n).map(|x| (x as f64).powf(bias)).collect();
         Ok(Self { crp, pow_cache })

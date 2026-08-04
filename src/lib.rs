@@ -1,8 +1,9 @@
-use color_eyre::{Result, eyre::WrapErr, eyre::bail};
+use color_eyre::{eyre::bail, eyre::WrapErr, Result};
 use itertools::Itertools;
 
 pub mod sampler;
 pub mod stats;
+pub mod theta;
 
 // newtype for configurations
 #[derive(Clone, Debug)]

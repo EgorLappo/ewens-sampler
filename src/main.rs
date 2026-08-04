@@ -1,5 +1,5 @@
 use clap::{ArgGroup, Parser};
-use color_eyre::eyre::{Result};
+use color_eyre::eyre::Result;
 use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
 use rand::SeedableRng;
@@ -34,12 +34,12 @@ fn main() -> Result<()> {
                 && bias != 1.0
             {
                 // use biased CRP
-                let sampler = BiasedCRPSampler::new(theta, n, k, bias, &ic.to_string())?;
-                run_test(sampler, tc, opts.samples, opts.seed, opts.json, opts.quiet, Some(ic))?;
+                let sampler = BiasedCRPSampler::new(theta, n, k, bias, Some(&ic))?;
+                run_test(sampler, tc, opts.samples, opts.seed, opts.json, opts.quiet, Some(&ic))?;
             } else {
                 // just use CRP
-                let sampler = ConditionalCRPSampler::new(theta, n, k, &ic.to_string())?;
-                run_test(sampler, tc, opts.samples, opts.seed, opts.json, opts.quiet, Some(ic))?;
+                let sampler = ConditionalCRPSampler::new(theta, n, k, Some(&ic))?;
+                run_test(sampler, tc, opts.samples, opts.seed, opts.json, opts.quiet, Some(&ic))?;
             }
         } else {
             // do we have nontrivial bias requested?
@@ -47,11 +47,11 @@ fn main() -> Result<()> {
                 && bias != 1.0
             {
                 // here ic is empty
-                let sampler = BiasedCRPSampler::new(theta, n, k, bias, "")?;
+                let sampler = BiasedCRPSampler::new(theta, n, k, bias, None)?;
                 run_test(sampler, tc, opts.samples, opts.seed, opts.json, opts.quiet, None)?;
             } else {
                 // if not, just sample with Feller again
-                let sampler = FellerSamplerK::new(theta, n, k);
+                let sampler = FellerSamplerK::new(theta, n, k)?;
                 run_test(sampler, tc, opts.samples, opts.seed, opts.json, opts.quiet, None)?;
             }
         }
@@ -69,11 +69,11 @@ fn main() -> Result<()> {
                     && bias != 1.0
                 {
                     // use biased CRP
-                    let sampler = BiasedCRPSampler::new(theta, n, k, bias, &ic.to_string())?;
+                    let sampler = BiasedCRPSampler::new(theta, n, k, bias, Some(&ic))?;
                     run_sampler(sampler, opts.samples, opts.seed, opts.quiet)?;
                 } else {
                     // just use CRP
-                    let sampler = ConditionalCRPSampler::new(theta, n, k, &ic.to_string())?;
+                    let sampler = ConditionalCRPSampler::new(theta, n, k, Some(&ic))?;
                     run_sampler(sampler, opts.samples, opts.seed, opts.quiet)?;
                 }
             } else {
@@ -82,11 +82,11 @@ fn main() -> Result<()> {
                     && bias != 1.0
                 {
                     // here ic is empty
-                    let sampler = BiasedCRPSampler::new(theta, n, k, bias, "")?;
+                    let sampler = BiasedCRPSampler::new(theta, n, k, bias, None)?;
                     run_sampler(sampler, opts.samples, opts.seed, opts.quiet)?;
                 } else {
                     // if not, just sample with Feller again
-                    let sampler = FellerSamplerK::new(theta, n, k);
+                    let sampler = FellerSamplerK::new(theta, n, k)?;
                     run_sampler(sampler, opts.samples, opts.seed, opts.quiet)?;
                 }
             }
@@ -218,7 +218,7 @@ fn run_test(
     seed: u64,
     json: bool,
     quiet: bool,
-    ic: Option<Configuration>
+    ic: Option<&Configuration>
 ) -> Result<()> {
     let mut rng = Pcg64::seed_from_u64(seed);
 
