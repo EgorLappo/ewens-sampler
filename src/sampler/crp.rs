@@ -269,10 +269,10 @@ impl Sampler for BiasedCRPSampler {
 
         // assignment of samples to cycles
         let mut configuration = self.crp.conf_init.clone();
-        let mut assignment = self.crp.assignment_init.clone();
+        // let mut assignment = self.crp.assignment_init.clone();
 
         // samples_assigned will index assignment (it has elements 0..samples_assigned filled in)
-        let mut samples_assigned = self.crp.n_init;
+        // let mut samples_assigned = self.crp.n_init;
 
         // first deal with the case in which k == k_init,
         // as then we don't even need to sample the zetas, they are all zero
@@ -280,11 +280,11 @@ impl Sampler for BiasedCRPSampler {
             // p here keeps track of the number of unassigned samples instead of zetas
             for _ in 0..self.crp.n_vars {
                 let cycle_choice = choose_biased(&configuration, &self.pow_cache, rng);
-                assignment[samples_assigned] = cycle_choice;
+                // assignment[samples_assigned] = cycle_choice;
 
                 // increment configuration
                 configuration[cycle_choice] += 1;
-                samples_assigned += 1;
+                // samples_assigned += 1;
             }
         } else {
             // otherwise, finish sampling the configuration as usual
@@ -301,7 +301,7 @@ impl Sampler for BiasedCRPSampler {
                     // the sample in the same cycle as
                     // a randomly chosen previous sample
                     let cycle_choice = choose_biased(&configuration, &self.pow_cache, rng);
-                    assignment[samples_assigned] = cycle_choice;
+                    // assignment[samples_assigned] = cycle_choice;
 
                     // increment configuration
                     configuration[cycle_choice] += 1;
@@ -311,10 +311,10 @@ impl Sampler for BiasedCRPSampler {
                     // increment configuration
                     // here we fill a new element
                     configuration.push(1);
-                    assignment[samples_assigned] = configuration.len() - 1;
+                    // assignment[samples_assigned] = configuration.len() - 1;
                 }
 
-                samples_assigned += 1;
+                // samples_assigned += 1;
             }
         }
 
