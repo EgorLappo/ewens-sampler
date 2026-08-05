@@ -28,6 +28,10 @@ fn ln_add_exp(a: f64, b: f64) -> f64 {
 }
 
 fn conditional_bernoulli_log_q(s: usize, p: &[f64]) -> Box<[f64]> {
+    debug_assert!(
+        p.iter().all(|&x| (0.0..=1.0).contains(&x)),
+        "p outside [0,1]"
+    );
     let n = p.len();
     assert!(s <= n, "conditional_bernoulli: sum > number of variables");
 

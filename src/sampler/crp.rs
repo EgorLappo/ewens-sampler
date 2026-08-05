@@ -338,13 +338,11 @@ fn conditional_crp_bernoulli_p(n_init: usize, n: usize, theta: f64) -> Box<[f64]
     // compute probabilities for the chinese restaurant process
     // p_j = theta / (theta + j - 1),
     //   where j = 1, ..., n
-    // NOTE: we do not need first variable as p_1 = 1
-    ((n_init + 1)..=n)
-        .map(|j| theta / (theta + (j as f64) - 1.))
-        .collect()
+    (n_init..n).map(|j| theta / (theta + (j as f64))).collect()
 }
 
 fn choose_biased<R: Rng>(xs: &[u16], pow: &[f64], rng: &mut R) -> usize {
+    debug_assert!(!xs.is_empty(), "no xs to choose from");
     // get the norm
     let mut norm = 0.0;
     for &x in xs {
