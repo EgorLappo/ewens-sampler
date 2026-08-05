@@ -22,12 +22,12 @@ fn main() -> Result<()> {
     let opts = Opts::parse();
 
     // first, will we test or sample?
-    if let Some(tc) = opts.test {
+    if let Some(ref tc) = opts.test {
         let n = tc.n();
         let k = tc.k();
 
         // do we have an initial configuration or not
-        if let Some(ic) = opts.initial_configuration {
+        if let Some(ref ic) = opts.initial_configuration {
             let n0 = ic.n();
             let k0 = ic.k();
             let theta = theta_mle(n, k, Some((n0, k0)));
@@ -37,27 +37,11 @@ fn main() -> Result<()> {
             {
                 // use biased CRP
                 let sampler = BiasedCRPSampler::new(theta, n, k, bias, Some(&ic))?;
-                run_test(
-                    sampler,
-                    tc,
-                    opts.samples,
-                    opts.seed,
-                    opts.json,
-                    opts.quiet,
-                    Some(&ic),
-                )?;
+                run_test(sampler, tc, Some(&ic), &opts)?;
             } else {
                 // just use CRP
                 let sampler = ConditionalCRPSampler::new(theta, n, k, Some(&ic))?;
-                run_test(
-                    sampler,
-                    tc,
-                    opts.samples,
-                    opts.seed,
-                    opts.json,
-                    opts.quiet,
-                    Some(&ic),
-                )?;
+                run_test(sampler, tc, Some(&ic), &opts)?;
             }
         } else {
             let theta = theta_mle(n, k, None);
@@ -67,27 +51,11 @@ fn main() -> Result<()> {
             {
                 // here ic is empty
                 let sampler = BiasedCRPSampler::new(theta, n, k, bias, None)?;
-                run_test(
-                    sampler,
-                    tc,
-                    opts.samples,
-                    opts.seed,
-                    opts.json,
-                    opts.quiet,
-                    None,
-                )?;
+                run_test(sampler, tc, None, &opts)?;
             } else {
                 // if not, just sample with Feller again
                 let sampler = FellerSamplerK::new(theta, n, k)?;
-                run_test(
-                    sampler,
-                    tc,
-                    opts.samples,
-                    opts.seed,
-                    opts.json,
-                    opts.quiet,
-                    None,
-                )?;
+                run_test(sampler, tc, None, &opts)?;
             }
         }
     } else {
@@ -249,16 +217,15 @@ fn run_sampler(sampler: impl Sampler, samples: usize, seed: u64, quiet: bool) ->
 /// run sampler and test specific configuration
 fn run_test(
     sampler: impl Sampler,
-    test_configuration: Configuration,
-    samples: usize,
-    seed: u64,
-    json: bool,
-    quiet: bool,
+    test_configuration: &Configuration,
     ic: Option<&Configuration>,
+    opts: &Opts,
 ) -> Result<()> {
+    let samples = opts.samples;
+    let seed = opts.seed;
     let mut rng = Pcg64::seed_from_u64(seed);
 
-    let pb = if quiet {
+    let pb = if opts.quiet {
         None
     } else {
         let style = ProgressStyle::with_template(PROGRESS_STYLE).unwrap();
@@ -299,11 +266,11 @@ fn run_test(
     let s_ptail = (s_total + 1) as f64 / (samples + 1) as f64;
     let w_ptail = (w_total + 1) as f64 / (samples + 1) as f64;
 
-    if json {
-        let val = serde_json::json!({
+    if opts.json {
+        let mut val = serde_json::json!({
             "configuration": test_configuration.to_string(),
             "theta": sampler.theta(),
-            "seed": seed,
+            "seed": opts.seed,
             "replicates": samples,
             "tests": [
                {
@@ -321,6 +288,19 @@ fn run_test(
             ]
         });
 
+        if let Some(val) = val.as_object_mut() {
+            if let Some(ic) = ic {
+                val.insert(
+                    "initial_configuration".to_string(),
+                    serde_json::json!(ic.to_string()),
+                );
+            }
+
+            if let Some(b) = opts.bias {
+                val.insert("bias".to_string(), serde_json::json!(b));
+            }
+        }
+
         let string = serde_json::to_string(&val)?;
         println!("{}", string);
     } else {
@@ -329,6 +309,9 @@ fn run_test(
         println!("configuration\t'{}'", test_configuration);
         if let Some(ic) = ic {
             println!("initial configuration\t'{}'", ic);
+        }
+        if let Some(b) = opts.bias {
+            println!("bias\t{}", b)
         }
         println!("theta\t{}", sampler.theta());
 

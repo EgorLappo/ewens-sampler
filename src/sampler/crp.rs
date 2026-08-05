@@ -1,8 +1,8 @@
 use crate::{
-    sampler::{conditional_bernoulli_probs, conditional_bernoulli_sample, Sampler},
     Configuration,
+    sampler::{Sampler, conditional_bernoulli_probs, conditional_bernoulli_sample},
 };
-use color_eyre::eyre::{bail, Result};
+use color_eyre::eyre::{Result, bail};
 use rand::{Rng, RngExt};
 use rand_pcg::Pcg64;
 
