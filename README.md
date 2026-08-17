@@ -9,7 +9,7 @@
 ### Help messages:
 
 ```
-> ./ewinfer --help
+> ./ewens-sampler --help
 a ewens distribution utility
 
 Usage: ewinfer [OPTIONS]
