@@ -98,7 +98,7 @@ fn conditional_bernoulli_log_q(n: usize, s: usize, p: &[f64]) -> Box<[f64]> {
     // now, the recursion is
     //   q[x, i, j] = p[x, j] q[x+1, i-1, j+1] + (1 - p[x, j]) q[x, i, j+1]
     // which with x = s - i is
-    //   lq[i, j] = p[s-i, j] lq[i-1, j+1] + (1 - p[s-i, j]) lq[i, j+1]
+    //   lq[i, j] = log( p[s-i, j] e^q[i-1, j+1] + (1 - p[s-i, j]) e^lq[i, j+1] )
     // so we go up the indices of i and down the indices of j.
     // q is zero when i > n-j, so j only goes up to n-i; x > j is unreachable,
     // but p is 0 there so it is harmless and reachable entries never read it
@@ -112,6 +112,51 @@ fn conditional_bernoulli_log_q(n: usize, s: usize, p: &[f64]) -> Box<[f64]> {
     }
 
     lq.into_boxed_slice()
+}
+
+// actual conditional bernoulli variables are sampled with probs P that
+// now depend on the sum of previous samples y through p, but since the total is fixed
+// at s, that is the same as depending on the remaining sum s - y, like in ew_sampler:
+//
+// let P[j, s] be the probability of jth Bernoulli variable zeta_j conditional on the total sum of n being equal to s.
+// then,
+// P[j, s] = p[y, j] q[y + 1, s - y - 1, j+1] / q[y, s - y, j]
+//   where y = sum_(m=1)^(j-1) zeta_m (y is 1-based math notation), and P[1, s] is the case y = 0
+//
+// with i = s - y remaining and lq[i, j] = log q[s-i, i, j] this is
+//   P = p[s-i, j] e^lq[i-1, j+1] / e^lq[i, j]
+fn conditional_bernoulli_probs(n: usize, s: usize, alpha: f64, theta: f64) -> Box<[f64]> {
+    if s == 0 {
+        return Vec::new().into_boxed_slice();
+    }
+
+    let p = py_zetas(n, s, theta, alpha);
+    let ln_p: Vec<f64> = p.iter().map(|x| x.ln()).collect();
+    let lq = conditional_bernoulli_log_q(n, s, &p);
+
+    // here we fill the probabilities used in conditional sampling, also
+    // of shape s*n like in ew_sampler, so with i remaining it is probs[(i-1)*n + j]
+    // and ew_sampler::conditional_bernoulli_sample_into works unchanged
+    let mut probs = vec![0.0f64; s * n];
+
+    // fill probs
+    for i in 1..=s {
+        let x = s - i;
+        // i <= n-j, as there have to be enough variables left
+        for j in 0..=(n - i) {
+            let ln_denum = lq[i * n + j];
+            // past the last variable q is 1 for nothing remaining, and j = n-1 only has i = 1
+            let ln_num = ln_p[n * x + j]
+                + if j + 1 == n {
+                    0.0
+                } else {
+                    lq[(i - 1) * n + j + 1]
+                };
+            probs[(i - 1) * n + j] = (ln_num - ln_denum).exp().clamp(0.0, 1.0);
+        }
+    }
+
+    probs.into_boxed_slice()
 }
 
 #[cfg(test)]
@@ -157,6 +202,90 @@ mod tests {
                     assert!(
                         (got - q).abs() < 1e-12,
                         "n={n} s={s} i={i} j={j}: {got} vs {q}"
+                    );
+                }
+            }
+        }
+    }
+
+    // q[x, i, j] by enumerating all suffixes
+    fn brute_q(n: usize, p: &[f64], x: usize, i: usize, j: usize) -> f64 {
+        sequences(n - j)
+            .filter(|zs| zs.iter().sum::<usize>() == i)
+            .map(|zs| path_prob(n, p, x, j, &zs))
+            .sum()
+    }
+
+    // probs[i-1, j] against p[x, j] q[x+1, i-1, j+1] / q[x, i, j] with x = s-i,
+    // everywhere the sampler can get to
+    #[test]
+    fn probs_match_brute_force() {
+        for (n, s, theta, alpha) in [
+            (6, 3, 1.3, 0.4),
+            (7, 4, 0.2, 0.9),
+            (5, 5, 2.0, 0.5),
+            (6, 1, 1.0, 0.0),
+        ] {
+            let p = py_zetas(n, s, theta, alpha);
+            let probs = conditional_bernoulli_probs(n, s, alpha, theta);
+            for i in 1..=s {
+                let x = s - i;
+                // x <= j, as there can't be more tables than customers
+                for j in x..=(n - i) {
+                    let want = p[n * x + j] * brute_q(n, &p, x + 1, i - 1, j + 1)
+                        / brute_q(n, &p, x, i, j);
+                    let got = probs[(i - 1) * n + j];
+                    assert!(
+                        (got - want).abs() < 1e-12,
+                        "n={n} s={s} i={i} j={j}: {got} vs {want}"
+                    );
+                }
+            }
+        }
+    }
+
+    // probability that ew_sampler::conditional_bernoulli_sample_into draws zs from probs,
+    // following its shortcuts: nothing remaining means the rest are 0, and as many remaining
+    // as variables left means the rest are 1
+    fn sampler_prob(n: usize, s: usize, probs: &[f64], zs: &[usize]) -> f64 {
+        let mut rem = s;
+        let mut prob = 1.0;
+        for (j, &z) in zs.iter().enumerate() {
+            let pj = if rem == 0 {
+                0.0
+            } else if rem == n - j {
+                1.0
+            } else {
+                probs[(rem - 1) * n + j]
+            };
+            prob *= if z == 1 { pj } else { 1.0 - pj };
+            if prob == 0.0 {
+                return 0.0;
+            }
+            rem -= z;
+        }
+        prob
+    }
+
+    // drawing with probs should give every sequence its probability under the zetas
+    // conditioned on summing to s, and nothing else
+    #[test]
+    fn probs_give_conditional_law() {
+        for (n, s, alpha) in [(7, 3, 0.6), (6, 1, 0.3), (6, 6, 0.5), (8, 5, 0.0)] {
+            for theta in [0.3, 25.0] {
+                let p = py_zetas(n, s, theta, alpha);
+                let probs = conditional_bernoulli_probs(n, s, alpha, theta);
+                let total = brute_q(n, &p, 0, s, 0);
+                for zs in sequences(n) {
+                    let want = if zs.iter().sum::<usize>() == s {
+                        path_prob(n, &p, 0, 0, &zs) / total
+                    } else {
+                        0.0
+                    };
+                    let got = sampler_prob(n, s, &probs, &zs);
+                    assert!(
+                        (got - want).abs() < 1e-12,
+                        "n={n} s={s} alpha={alpha} theta={theta} {zs:?}: {got} vs {want}"
                     );
                 }
             }
