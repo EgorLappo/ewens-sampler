@@ -1,4 +1,4 @@
-use rand::{Rng, RngExt};
+use super::ln_add_exp;
 pub mod crp;
 pub mod feller;
 pub mod theta;
@@ -6,21 +6,9 @@ pub mod theta;
 pub use crp::{BiasedCRPSampler, CRPSamplerK, ConditionalCRPSampler, check_initial_configuration};
 pub use feller::{FellerSampler, FellerSamplerK};
 
-// *conditional bernoulli sampling
+// *conditional bernoulli probabilities for the ewens zetas
 // see reference module below for the code that follows the
 // algorithm directly without logs
-#[inline]
-pub(crate) fn ln_add_exp(a: f64, b: f64) -> f64 {
-    if a == f64::NEG_INFINITY {
-        return b;
-    }
-    if b == f64::NEG_INFINITY {
-        return a;
-    }
-    let (hi, lo) = if a > b { (a, b) } else { (b, a) };
-    hi + (lo - hi).exp().ln_1p()
-}
-
 fn conditional_bernoulli_log_q(s: usize, p: &[f64]) -> Box<[f64]> {
     debug_assert!(
         p.iter().all(|&x| (0.0..=1.0).contains(&x)),
@@ -104,46 +92,6 @@ fn conditional_bernoulli_probs(s: usize, p: &[f64]) -> Box<[f64]> {
         }
     }
     probs.into_boxed_slice()
-}
-
-fn conditional_bernoulli_sample<R: Rng>(n: usize, s: usize, p: &[f64], rng: &mut R) -> Vec<usize> {
-    let mut out = Vec::new();
-    conditional_bernoulli_sample_into(n, s, p, rng, &mut out);
-    out
-}
-
-fn conditional_bernoulli_sample_into<R: Rng>(
-    n: usize,
-    s: usize,
-    p: &[f64],
-    rng: &mut R,
-    out: &mut Vec<usize>,
-) {
-    // set all to zeros
-    out.clear();
-    out.resize(n, 0);
-
-    if s == 0 {
-        return;
-    }
-    let mut rem = s;
-    for j in 0..n {
-        if rem == 0 {
-            // short-circuit 1
-            break;
-        }
-        if rem == n - j {
-            // short-circuit 2
-            out[j..n].fill(1);
-            rem = 0;
-            break;
-        }
-        if rng.random::<f64>() < p[(rem - 1) * n + j] {
-            out[j] = 1;
-            rem -= 1;
-        }
-    }
-    debug_assert_eq!(rem, 0);
 }
 
 #[allow(dead_code)]
@@ -230,6 +178,7 @@ mod reference {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::samplers::conditional_bernoulli_sample;
     use rand::SeedableRng;
     use rand_pcg::Pcg64;
 

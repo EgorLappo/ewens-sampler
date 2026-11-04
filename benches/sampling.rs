@@ -7,12 +7,13 @@ use itertools::Itertools;
 use rand::SeedableRng;
 use rand_pcg::Pcg64;
 
-use ewens_sampler::ew_sampler::theta::theta_mle;
-use ewens_sampler::ew_sampler::{
+use ewens_sampler::Configuration;
+use ewens_sampler::samplers::Sampler;
+use ewens_sampler::samplers::ewens::theta::theta_mle;
+use ewens_sampler::samplers::ewens::{
     CRPSamplerK, ConditionalCRPSampler, FellerSampler, FellerSamplerK,
 };
 use ewens_sampler::stats::{SlatkinTest, Test, WattersonTest};
-use ewens_sampler::{Configuration, Sampler};
 
 const SEED: u64 = 231;
 

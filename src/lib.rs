@@ -1,16 +1,8 @@
 use color_eyre::{Result, eyre::WrapErr, eyre::bail};
 use itertools::Itertools;
-use rand::Rng;
 
-pub mod ew_sampler;
-pub mod py_sampler;
+pub mod samplers;
 pub mod stats;
-
-// trait for samplers
-pub trait Sampler<R: Rng> {
-    fn sample(&self, rng: &mut R) -> Vec<u16>;
-    fn theta(&self) -> f64;
-}
 
 // newtype for configurations
 #[derive(Clone, Debug)]

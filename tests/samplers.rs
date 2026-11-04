@@ -3,12 +3,13 @@
 mod common;
 
 use common::{Law, assert_fits, biased_crp_law, esf_law, given_k, partitions, py_crp_law, py_law};
-use ewens_sampler::ew_sampler::theta::theta_mle;
-use ewens_sampler::ew_sampler::{
+use ewens_sampler::Configuration;
+use ewens_sampler::samplers::Sampler;
+use ewens_sampler::samplers::ewens::theta::theta_mle;
+use ewens_sampler::samplers::ewens::{
     BiasedCRPSampler, CRPSamplerK, ConditionalCRPSampler, FellerSampler, FellerSamplerK,
 };
 use ewens_sampler::stats::watterson_statistic;
-use ewens_sampler::{Configuration, Sampler};
 use rand::SeedableRng;
 use rand_pcg::Pcg64;
 

@@ -1,7 +1,7 @@
 use rand::{Rng, RngExt};
 use rand_pcg::Pcg64;
 
-use crate::ew_sampler::ln_add_exp;
+use super::ln_add_exp;
 
 // helpers for sampling from the pitman yor distribution given
 // values of n, k, and alpha
@@ -40,7 +40,7 @@ fn py_zetas(n: usize, s: usize, theta: f64, alpha: f64) -> Box<[f64]> {
 // bernoulli zetas for the Pitman-Yor sampling
 //
 // with an extra parameter alpha, the natural q becomes a 3D array
-// rather than a 2D one in ew_sampler:
+// rather than a 2D one in ewens:
 //   q[x,i,j] is the probability that the sum of variables numbered
 //   j to n-1 is i given that the sum of variables numbered
 //   0 to j-1 is x
@@ -48,7 +48,7 @@ fn py_zetas(n: usize, s: usize, theta: f64, alpha: f64) -> Box<[f64]> {
 // conditioning on the total being s we only ever need the slice x = s-i.
 // so we only store that:
 //   lq[i, j] = log q[s-i, i, j]
-// which has the same (s+1)*n shape as in ew_sampler
+// which has the same (s+1)*n shape as in ewens
 fn conditional_bernoulli_log_q(n: usize, s: usize, p: &[f64]) -> Box<[f64]> {
     debug_assert!(
         p.iter().all(|&x| (0.0..=1.0).contains(&x)),
@@ -116,7 +116,7 @@ fn conditional_bernoulli_log_q(n: usize, s: usize, p: &[f64]) -> Box<[f64]> {
 
 // actual conditional bernoulli variables are sampled with probs P that
 // now depend on the sum of previous samples y through p, but since the total is fixed
-// at s, that is the same as depending on the remaining sum s - y, like in ew_sampler:
+// at s, that is the same as depending on the remaining sum s - y, like in ewens:
 //
 // let P[j, s] be the probability of jth Bernoulli variable zeta_j conditional on the total sum of n being equal to s.
 // then,
@@ -125,7 +125,7 @@ fn conditional_bernoulli_log_q(n: usize, s: usize, p: &[f64]) -> Box<[f64]> {
 //
 // with i = s - y remaining and lq[i, j] = log q[s-i, i, j] this is
 //   P = p[s-i, j] e^lq[i-1, j+1] / e^lq[i, j]
-fn conditional_bernoulli_probs(n: usize, s: usize, alpha: f64, theta: f64) -> Box<[f64]> {
+fn conditional_bernoulli_probs(n: usize, s: usize, theta: f64, alpha: f64) -> Box<[f64]> {
     if s == 0 {
         return Vec::new().into_boxed_slice();
     }
@@ -135,8 +135,8 @@ fn conditional_bernoulli_probs(n: usize, s: usize, alpha: f64, theta: f64) -> Bo
     let lq = conditional_bernoulli_log_q(n, s, &p);
 
     // here we fill the probabilities used in conditional sampling, also
-    // of shape s*n like in ew_sampler, so with i remaining it is probs[(i-1)*n + j]
-    // and ew_sampler::conditional_bernoulli_sample_into works unchanged
+    // of shape s*n like in ewens, so with i remaining it is probs[(i-1)*n + j]
+    // and the shared conditional_bernoulli_sample_into works unchanged
     let mut probs = vec![0.0f64; s * n];
 
     // fill probs
@@ -227,7 +227,7 @@ mod tests {
             (6, 1, 1.0, 0.0),
         ] {
             let p = py_zetas(n, s, theta, alpha);
-            let probs = conditional_bernoulli_probs(n, s, alpha, theta);
+            let probs = conditional_bernoulli_probs(n, s, theta, alpha);
             for i in 1..=s {
                 let x = s - i;
                 // x <= j, as there can't be more tables than customers
@@ -244,7 +244,7 @@ mod tests {
         }
     }
 
-    // probability that ew_sampler::conditional_bernoulli_sample_into draws zs from probs,
+    // probability that the shared conditional_bernoulli_sample_into draws zs from probs,
     // following its shortcuts: nothing remaining means the rest are 0, and as many remaining
     // as variables left means the rest are 1
     fn sampler_prob(n: usize, s: usize, probs: &[f64], zs: &[usize]) -> f64 {
@@ -274,7 +274,7 @@ mod tests {
         for (n, s, alpha) in [(7, 3, 0.6), (6, 1, 0.3), (6, 6, 0.5), (8, 5, 0.0)] {
             for theta in [0.3, 25.0] {
                 let p = py_zetas(n, s, theta, alpha);
-                let probs = conditional_bernoulli_probs(n, s, alpha, theta);
+                let probs = conditional_bernoulli_probs(n, s, theta, alpha);
                 let total = brute_q(n, &p, 0, s, 0);
                 for zs in sequences(n) {
                     let want = if zs.iter().sum::<usize>() == s {

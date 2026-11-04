@@ -1,5 +1,6 @@
-use crate::ew_sampler::{conditional_bernoulli_probs, conditional_bernoulli_sample};
-use crate::{Configuration, Sampler};
+use super::conditional_bernoulli_probs;
+use crate::Configuration;
+use crate::samplers::{Sampler, conditional_bernoulli_sample};
 use color_eyre::eyre::{Result, bail};
 use rand::{Rng, RngExt};
 

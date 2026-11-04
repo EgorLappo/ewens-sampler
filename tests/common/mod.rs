@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use ewens_sampler::Sampler;
+use ewens_sampler::samplers::Sampler;
 use rand::SeedableRng;
 use rand_pcg::Pcg64;
 
