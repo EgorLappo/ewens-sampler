@@ -13,6 +13,7 @@ use ewens_sampler::samplers::ewens::theta::theta_mle;
 use ewens_sampler::samplers::ewens::{
     CRPSamplerK, ConditionalCRPSampler, FellerSampler, FellerSamplerK,
 };
+use ewens_sampler::samplers::pitman_yor::PYSamplerK;
 use ewens_sampler::stats::{SlatkinTest, Test, WattersonTest};
 
 const SEED: u64 = 231;
@@ -32,7 +33,7 @@ fn grid() -> impl Iterator<Item = (usize, usize)> {
 type Make = fn(f64, usize, usize) -> Box<dyn Sampler<Pcg64>>;
 
 // the conditional samplers, built for (theta, n, k)
-fn samplers() -> [(&'static str, Make); 3] {
+fn samplers() -> [(&'static str, Make); 4] {
     [
         ("feller", |t, n, k| {
             Box::new(FellerSamplerK::new(t, n, k).unwrap())
@@ -40,6 +41,10 @@ fn samplers() -> [(&'static str, Make); 3] {
         ("crp", |t, n, k| Box::new(CRPSamplerK::new(t, n, k))),
         ("conditional_crp", |t, n, k| {
             Box::new(ConditionalCRPSampler::new(t, n, k, None).unwrap())
+        }),
+        // alpha matters for speed, as joining a table is retried w.p. alpha at most
+        ("pitman_yor", |t, n, k| {
+            Box::new(PYSamplerK::new(t, 0.5, n, k))
         }),
     ]
 }

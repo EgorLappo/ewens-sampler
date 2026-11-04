@@ -9,6 +9,7 @@ use ewens_sampler::samplers::ewens::theta::theta_mle;
 use ewens_sampler::samplers::ewens::{
     BiasedCRPSampler, CRPSamplerK, ConditionalCRPSampler, FellerSampler, FellerSamplerK,
 };
+use ewens_sampler::samplers::pitman_yor::PYSamplerK;
 use ewens_sampler::stats::watterson_statistic;
 use rand::SeedableRng;
 use rand_pcg::Pcg64;
@@ -135,6 +136,23 @@ fn biased_crp_fits_exact_law() {
     }
 }
 
+// conditional on k the pitman-yor law depends only on alpha (alpha = 0 is ewens),
+// for any theta > -alpha
+#[test]
+fn pitman_yor_k_fits_exact_law() {
+    for alpha in [0.0, 0.5, 0.9] {
+        // the last two have a single possible configuration
+        for (n, k) in [(10, 4), (9, 2), (7, 1), (6, 6)] {
+            let law = py_law(n, k, alpha);
+            for theta in THETAS.into_iter().chain((alpha > 0.4).then_some(-0.4)) {
+                let sampler = PYSamplerK::new(theta, alpha, n, k);
+                let label = format!("pitman-yor alpha={alpha} n={n} k={k} theta={theta}");
+                assert_fits(&label, &sampler, &law, 1);
+            }
+        }
+    }
+}
+
 // *agreement at realistic sizes
 
 // mean and variance of the homozygosity and of the largest allele count
@@ -156,6 +174,25 @@ fn summary(sampler: &dyn Sampler<Pcg64>, samples: usize, seed: u64) -> [(f64, f6
     })
 }
 
+// both mean summaries agree to within 5 standard errors
+fn assert_same_summary(
+    name: &str,
+    reference: [(f64, f64); 2],
+    other: [(f64, f64); 2],
+    samples: usize,
+) {
+    for (stat, (m1, v1), (m2, v2)) in [
+        ("homozygosity", reference[0], other[0]),
+        ("largest count", reference[1], other[1]),
+    ] {
+        let z = (m2 - m1) / ((v1 + v2) / samples as f64).sqrt();
+        assert!(
+            z.abs() < 5.0,
+            "{name}: mean {stat} {m2:.2} vs reference {m1:.2} (z = {z:.1})"
+        );
+    }
+}
+
 // we can't enumerate configurations at the sizes in the benchmarks, so check that all
 // samplers agree with feller there, also for extreme values of theta
 #[test]
@@ -164,7 +201,7 @@ fn samplers_agree_at_large_n() {
     let theta = theta_mle(n, k, None);
     let reference = summary(&FellerSamplerK::new(theta, n, k).unwrap(), samples, 1);
 
-    let others: [(&str, Box<dyn Sampler<Pcg64>>); 5] = [
+    let others: [(&str, Box<dyn Sampler<Pcg64>>); 6] = [
         ("crp", Box::new(CRPSamplerK::new(theta, n, k))),
         (
             "conditional crp",
@@ -179,19 +216,27 @@ fn samplers_agree_at_large_n() {
             Box::new(FellerSamplerK::new(0.01, n, k).unwrap()),
         ),
         ("crp, theta 1000", Box::new(CRPSamplerK::new(1000.0, n, k))),
+        (
+            "pitman-yor, alpha 0",
+            Box::new(PYSamplerK::new(theta, 0.0, n, k)),
+        ),
     ];
     for (seed, (name, sampler)) in (2..).zip(others) {
         let other = summary(&*sampler, samples, seed);
-        for (stat, (m1, v1), (m2, v2)) in [
-            ("homozygosity", reference[0], other[0]),
-            ("largest count", reference[1], other[1]),
-        ] {
-            let z = (m2 - m1) / ((v1 + v2) / samples as f64).sqrt();
-            assert!(
-                z.abs() < 5.0,
-                "{name}: mean {stat} {m2:.2} vs feller {m1:.2} (z = {z:.1})"
-            );
-        }
+        assert_same_summary(name, reference, other, samples);
+    }
+}
+
+// for alpha > 0 there is no other sampler to compare to at these sizes,
+// but the law given k still must not depend on theta
+#[test]
+fn pitman_yor_free_of_theta_at_large_n() {
+    let (n, k, samples, alpha) = (265, 81, 20_000, 0.5);
+    let reference = summary(&PYSamplerK::new(1.0, alpha, n, k), samples, 1);
+    for (seed, theta) in [(2, -0.4), (3, 50.0)] {
+        let other = summary(&PYSamplerK::new(theta, alpha, n, k), samples, seed);
+        let name = format!("pitman-yor alpha={alpha}, theta {theta} vs 1");
+        assert_same_summary(&name, reference, other, samples);
     }
 }
 
@@ -214,10 +259,14 @@ fn samples_have_k_alleles_summing_to_n() {
         ks.dedup();
         for k in ks {
             for theta in [0.05, 1.0, 30.0] {
-                let samplers: [(&str, Box<dyn Sampler<Pcg64>>); 5] = [
+                let samplers: [(&str, Box<dyn Sampler<Pcg64>>); 6] = [
                     (
                         "feller",
                         Box::new(FellerSamplerK::new(theta, n, k).unwrap()),
+                    ),
+                    (
+                        "pitman-yor 0.5",
+                        Box::new(PYSamplerK::new(theta, 0.5, n, k)),
                     ),
                     ("crp", Box::new(CRPSamplerK::new(theta, n, k))),
                     (

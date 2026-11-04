@@ -1,36 +1,41 @@
 use rand::{Rng, RngExt};
 use rand_pcg::Pcg64;
 
-use super::ln_add_exp;
+use super::{Sampler, conditional_bernoulli_sample, ln_add_exp};
 
 // helpers for sampling from the pitman yor distribution given
 // values of n, k, and alpha
 //
-// we do this by choosing a theta, then defining n bernoulli variables
-// zeta_j = (theta + x * alpha)/(theta + j), x=0..=s, j=0..(n-1)
-// (j is 0-based, so it is the number of customers already seated,
-// and x is the number of tables already open)
-// then conditioning on zetas summing to s with a recursive calculation of
+// we do this by choosing a theta, then like crp_bernoulli_p in ewens, defining n bernoulli
+// variables only for the customers after the first, who always opens a table.
+// with j 0-based, variable j is for the customer who finds j + 1 customers already seated
+// at x + 1 tables, where x is the sum of the variables before it:
+// zeta_j = (theta + (x + 1) * alpha)/(theta + j + 1), x=0..=s, j=0..(n-1)
+// then conditioning on zetas summing to s = k - 1 with a recursive calculation of
 // new conditional probabilities
 
 // first, the vector of probabilities for zeta
 //
-// flat, of shape (s+1)*n, so p[x, j] is p[n * x + j]
-// only x <= j is reachable (can't have more tables than customers),
+// n is the number of variables, so one less than the number of customers
+// (crp_bernoulli_p in ewens takes the number of customers and iterates over 2..=n instead).
+// this is because here we have two-dimensional array of probabilities
+//
+// we use it flattened, with shape (s+1)*n, so p[x, j] is p[n * x + j]
+// only x <= j is reachable (the j variables before j can't sum to more),
 // the rest stay at 0 so they are valid probabilities that never get used
-// NOTE: needs theta > 0 and 0 <= alpha < 1 for p[x, j] to be in (0, 1] when x <= j
+// NOTE: needs theta > -alpha and 0 <= alpha < 1 for p[x, j] to be in (0, 1) when x <= j
 fn py_zetas(n: usize, s: usize, theta: f64, alpha: f64) -> Box<[f64]> {
     assert!(s <= n, "py_zetas: sum > number of variables");
     assert!(
-        theta > 0.0 && (0.0..1.0).contains(&alpha),
-        "py_zetas: need theta > 0 and 0 <= alpha < 1, got theta={theta}, alpha={alpha}"
+        theta > -alpha && (0.0..1.0).contains(&alpha),
+        "py_zetas: need theta > -alpha and 0 <= alpha < 1, got theta={theta}, alpha={alpha}"
     );
 
     let mut p = vec![0.0; n * (s + 1)];
 
     for x in 0..=s {
         for j in x..n {
-            p[n * x + j] = (theta + (x as f64) * alpha) / (theta + (j as f64));
+            p[n * x + j] = (theta + ((x + 1) as f64) * alpha) / (theta + ((j + 1) as f64));
         }
     }
 
@@ -159,6 +164,98 @@ fn conditional_bernoulli_probs(n: usize, s: usize, theta: f64, alpha: f64) -> Bo
     probs.into_boxed_slice()
 }
 
+// TODO: next, can we do this by Feller coupling?
+#[derive(Debug, Clone)]
+pub struct PYSampler {
+    pub theta: f64,
+    pub alpha: f64,
+    pub n: usize,
+    p: Box<[f64]>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PYSamplerK {
+    pub theta: f64,
+    pub alpha: f64,
+    pub n: usize,
+    pub k: usize,
+    n_vars: usize,
+    probs: Box<[f64]>,
+}
+
+impl PYSamplerK {
+    pub fn new(theta: f64, alpha: f64, n: usize, k: usize) -> Self {
+        // zetas for customers 2..=n, like crp_bernoulli_p in ewens
+        // (first one is forced to be 1)
+        let n_vars = n - 1;
+        // conditioned ones
+        let probs = conditional_bernoulli_probs(n_vars, k - 1, theta, alpha);
+        Self {
+            theta,
+            alpha,
+            n,
+            k,
+            n_vars,
+            probs,
+        }
+    }
+}
+
+impl<R: Rng> Sampler<R> for PYSamplerK {
+    fn sample(&self, rng: &mut R) -> Vec<u16> {
+        let zetas = conditional_bernoulli_sample(self.n_vars, self.k - 1, &self.probs, rng);
+
+        // in the chinese restaurant process, the configuration is built
+        // sample-by sample
+
+        // assignment of samples to cycles
+        let mut assignment = vec![0; self.n];
+        // first element must go into the first cycle
+        assignment[0] = 0;
+
+        // variables to keep track of progress
+        let mut cycle = 0;
+
+        let mut configuration = vec![0; self.k];
+        configuration[cycle] += 1;
+
+        for (samples_assigned, s) in (1..).zip(zetas.iter()) {
+            if *s == 0 {
+                // if s == 0, we must place the sample in an existing cycle c,
+                // but now with probability proportional to n_c - alpha.
+                // a randomly chosen previous sample is in cycle c w.p. n_c / samples_assigned,
+                // so we keep its cycle w.p. (n_c - alpha) / n_c and otherwise choose again,
+                // which works out at least a (1 - alpha) fraction of the time
+                let cycle_choice = loop {
+                    let choice = rng.random_range(..samples_assigned);
+                    let c = assignment[choice];
+                    let size = configuration[c] as f64;
+                    if rng.random::<f64>() * size < size - self.alpha {
+                        break c;
+                    }
+                };
+                assignment[samples_assigned] = cycle_choice;
+
+                // increment configuration
+                configuration[cycle_choice] += 1;
+            } else {
+                // if s == 1, we must start a new cycle
+                cycle += 1;
+                assignment[samples_assigned] = cycle;
+
+                // increment configuration
+                configuration[cycle] += 1;
+            }
+        }
+
+        configuration
+    }
+
+    fn theta(&self) -> f64 {
+        self.theta
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -271,7 +368,14 @@ mod tests {
     // conditioned on summing to s, and nothing else
     #[test]
     fn probs_give_conditional_law() {
-        for (n, s, alpha) in [(7, 3, 0.6), (6, 1, 0.3), (6, 6, 0.5), (8, 5, 0.0)] {
+        // s = 0 is k = 1, everyone at the first table
+        for (n, s, alpha) in [
+            (7, 3, 0.6),
+            (6, 1, 0.3),
+            (6, 6, 0.5),
+            (8, 5, 0.0),
+            (5, 0, 0.4),
+        ] {
             for theta in [0.3, 25.0] {
                 let p = py_zetas(n, s, theta, alpha);
                 let probs = conditional_bernoulli_probs(n, s, theta, alpha);
@@ -305,7 +409,8 @@ mod tests {
                 .map(|zs| path_prob(n, &p, 0, 0, &zs) / total)
                 .collect()
         };
-        let (a, b) = (law(0.3), law(25.0));
+        // theta only has to be above -alpha
+        let (a, b) = (law(-0.3), law(25.0));
         assert!((a.iter().sum::<f64>() - 1.0).abs() < 1e-12);
         for (x, y) in a.iter().zip(&b) {
             assert!((x - y).abs() < 1e-12, "{x} vs {y}");
