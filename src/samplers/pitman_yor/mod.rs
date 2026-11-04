@@ -1,7 +1,7 @@
 use super::{Sampler, conditional_bernoulli_sample, ln_add_exp};
 use rand::{Rng, RngExt};
 
-mod theta;
+pub mod theta;
 
 // helpers for sampling from the pitman yor distribution given
 // values of n, k, and alpha
@@ -338,7 +338,7 @@ impl PYSamplerK {
         // zetas for customers 2..=n, like crp_bernoulli_p in ewens
         // (first one is forced to be 1)
         let n_vars = n - 1;
-        // conditioned ones, except at alpha = 1, where the most balanced configuration
+        // conditioned ones, except at alpha = 1, where the most unbalanced configuration
         // is the only possible one (nothing to sample)
         let probs = if alpha == 1.0 {
             Vec::new().into_boxed_slice()

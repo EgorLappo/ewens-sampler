@@ -12,6 +12,7 @@ use ewens_sampler::samplers::ewens::theta::theta_mle;
 use ewens_sampler::samplers::ewens::{
     BiasedCRPSampler, CRPSamplerK, ConditionalCRPSampler, FellerSampler, FellerSamplerK,
 };
+use ewens_sampler::samplers::pitman_yor::theta::theta_mle as theta_mle_py;
 use ewens_sampler::samplers::pitman_yor::{PYSampler, PYSamplerK, default_theta};
 use ewens_sampler::stats::watterson_statistic;
 use rand::SeedableRng;
@@ -223,6 +224,22 @@ fn fits_py_law_for_any_theta(alphas: &[f64]) {
             }
         }
     }
+}
+
+// the mle is what the sampler gets in practice, and unlike default_theta it can be negative,
+// like for alpha = 0.9 with k = 2, or exactly k |alpha|, like for alpha = -10 with k = 4
+#[test]
+fn pitman_yor_k_fits_exact_law_at_the_mle() {
+    for alpha in [0.5, 0.9, -1.0, -10.0] {
+        for (n, k) in [(10, 4), (9, 2)] {
+            let theta = theta_mle_py(n, k, alpha, None);
+            let sampler = PYSamplerK::new(theta, alpha, n, k);
+            let label = format!("pitman-yor alpha={alpha} n={n} k={k} mle theta={theta}");
+            assert_fits(&label, &sampler, &py_law(n, k, alpha), 1);
+        }
+    }
+    assert!(theta_mle_py(9, 2, 0.9, None) < 0.0);
+    assert_eq!(theta_mle_py(10, 4, -10.0, None), 40.0);
 }
 
 // *agreement at realistic sizes
