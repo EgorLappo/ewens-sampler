@@ -1,6 +1,7 @@
 use rand::{Rng, RngExt};
 pub mod crp;
 pub mod feller;
+pub mod theta;
 
 pub use crp::{BiasedCRPSampler, CRPSamplerK, ConditionalCRPSampler};
 pub use feller::{FellerSampler, FellerSamplerK};

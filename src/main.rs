@@ -11,7 +11,6 @@ use ewens_sampler::ew_sampler::{
     BiasedCRPSampler, ConditionalCRPSampler, FellerSampler, FellerSamplerK
 };
 use ewens_sampler::stats::{SlatkinTest, Test, WattersonTest};
-use ewens_sampler::theta::theta_mle;
 
 const PROGRESS_STYLE: &str =
     "{spinner:.purple} [{elapsed}/{duration}] [{bar:.cyan/blue}] {human_pos}/{human_len}";
@@ -30,7 +29,7 @@ fn main() -> Result<()> {
         if let Some(ref ic) = opts.initial_configuration {
             let n0 = ic.n();
             let k0 = ic.k();
-            let theta = theta_mle(n, k, Some((n0, k0)));
+            let theta = ewens_sampler::ew_sampler::theta::theta_mle(n, k, Some((n0, k0)));
             // do we have nontrivial bias requested?
             if let Some(bias) = opts.bias
                 && bias != 1.0
@@ -44,7 +43,7 @@ fn main() -> Result<()> {
                 run_test(sampler, tc, Some(ic), &opts)?;
             }
         } else {
-            let theta = theta_mle(n, k, None);
+            let theta = ewens_sampler::ew_sampler::theta::theta_mle(n, k, None);
             // do we have nontrivial bias requested?
             if let Some(bias) = opts.bias
                 && bias != 1.0
@@ -67,7 +66,7 @@ fn main() -> Result<()> {
             if let Some(ic) = opts.initial_configuration {
                 let n0 = ic.n();
                 let k0 = ic.k();
-                let theta = theta_mle(n, k, Some((n0, k0)));
+                let theta = ewens_sampler::ew_sampler::theta::theta_mle(n, k, Some((n0, k0)));
 
                 // do we have nontrivial bias requested?
                 if let Some(bias) = opts.bias
@@ -82,7 +81,7 @@ fn main() -> Result<()> {
                     run_sampler(sampler, opts.samples, opts.seed, opts.quiet)?;
                 }
             } else {
-                let theta = theta_mle(n, k, None);
+                let theta = ewens_sampler::ew_sampler::theta::theta_mle(n, k, None);
                 // do we have nontrivial bias requested?
                 if let Some(bias) = opts.bias
                     && bias != 1.0

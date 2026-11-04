@@ -5,7 +5,6 @@ use rand::Rng;
 pub mod ew_sampler;
 pub mod py_sampler;
 pub mod stats;
-pub mod theta;
 
 // trait for samplers
 pub trait Sampler<R: Rng> {
