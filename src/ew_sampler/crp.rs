@@ -1,10 +1,7 @@
-use crate::{
-    Configuration,
-    sampler::{Sampler, conditional_bernoulli_probs, conditional_bernoulli_sample},
-};
-use color_eyre::eyre::{Result, bail};
+use crate::ew_sampler::{conditional_bernoulli_probs, conditional_bernoulli_sample};
+use crate::{Configuration, Sampler};
+use color_eyre::eyre::{bail, Result};
 use rand::{Rng, RngExt};
-use rand_pcg::Pcg64;
 
 #[derive(Debug, Clone)]
 pub struct CRPSamplerK {
@@ -31,8 +28,8 @@ impl CRPSamplerK {
     }
 }
 
-impl Sampler for CRPSamplerK {
-    fn sample(&self, rng: &mut Pcg64) -> Vec<u16> {
+impl<R: Rng> Sampler<R> for CRPSamplerK {
+    fn sample(&self, rng: &mut R) -> Vec<u16> {
         let zetas = conditional_bernoulli_sample(self.n_vars, self.k - 1, &self.probs, rng);
 
         // in the chinese restaurant process, the configuration is built
@@ -126,7 +123,7 @@ impl ConditionalCRPSampler {
                     ic,
                     ic.n(),
                     n
-                )
+                );
             }
             ic.0.clone()
         } else {
@@ -173,8 +170,8 @@ impl ConditionalCRPSampler {
     }
 }
 
-impl Sampler for ConditionalCRPSampler {
-    fn sample(&self, rng: &mut Pcg64) -> Vec<u16> {
+impl<R: Rng> Sampler<R> for ConditionalCRPSampler {
+    fn sample(&self, rng: &mut R) -> Vec<u16> {
         // in the chinese restaurant process, the configuration is built
         // sample-by sample
 
@@ -270,8 +267,8 @@ impl BiasedCRPSampler {
     }
 }
 
-impl Sampler for BiasedCRPSampler {
-    fn sample(&self, rng: &mut Pcg64) -> Vec<u16> {
+impl<R: Rng> Sampler<R> for BiasedCRPSampler {
+    fn sample(&self, rng: &mut R) -> Vec<u16> {
         // in the chinese restaurant process, the configuration is built
         // sample-by sample
 

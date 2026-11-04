@@ -1,16 +1,9 @@
 use rand::{Rng, RngExt};
-use rand_pcg::Pcg64;
 pub mod crp;
 pub mod feller;
 
 pub use crp::{BiasedCRPSampler, CRPSamplerK, ConditionalCRPSampler};
 pub use feller::{FellerSampler, FellerSamplerK};
-
-// sample configurations from the ewens distribution
-pub trait Sampler {
-    fn sample(&self, rng: &mut Pcg64) -> Vec<u16>;
-    fn theta(&self) -> f64;
-}
 
 // *conditional bernoulli sampling
 // see reference module below for the code that follows the
@@ -65,7 +58,11 @@ fn conditional_bernoulli_log_q(s: usize, p: &[f64]) -> Box<[f64]> {
     #[inline]
     fn at(lq: &[f64], n: usize, i: usize, j: usize) -> f64 {
         if j >= n {
-            if i == 0 { 0.0 } else { f64::NEG_INFINITY }
+            if i == 0 {
+                0.0
+            } else {
+                f64::NEG_INFINITY
+            }
         } else {
             lq[i * n + j]
         }

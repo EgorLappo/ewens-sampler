@@ -2,16 +2,16 @@ use clap::{ArgGroup, Parser};
 use color_eyre::eyre::Result;
 use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
-use rand::SeedableRng;
+use rand::{SeedableRng};
 use rand_pcg::Pcg64;
 use std::io::Write;
 
-use ewinfer::Configuration;
-use ewinfer::sampler::{
-    BiasedCRPSampler, ConditionalCRPSampler, FellerSampler, FellerSamplerK, Sampler,
+use ewens_sampler::{Sampler,Configuration};
+use ewens_sampler::ew_sampler::{
+    BiasedCRPSampler, ConditionalCRPSampler, FellerSampler, FellerSamplerK
 };
-use ewinfer::stats::{SlatkinTest, Test, WattersonTest};
-use ewinfer::theta::theta_mle;
+use ewens_sampler::stats::{SlatkinTest, Test, WattersonTest};
+use ewens_sampler::theta::theta_mle;
 
 const PROGRESS_STYLE: &str =
     "{spinner:.purple} [{elapsed}/{duration}] [{bar:.cyan/blue}] {human_pos}/{human_len}";
@@ -36,12 +36,12 @@ fn main() -> Result<()> {
                 && bias != 1.0
             {
                 // use biased CRP
-                let sampler = BiasedCRPSampler::new(theta, n, k, bias, Some(&ic))?;
-                run_test(sampler, tc, Some(&ic), &opts)?;
+                let sampler = BiasedCRPSampler::new(theta, n, k, bias, Some(ic))?;
+                run_test(sampler, tc, Some(ic), &opts)?;
             } else {
                 // just use CRP
-                let sampler = ConditionalCRPSampler::new(theta, n, k, Some(&ic))?;
-                run_test(sampler, tc, Some(&ic), &opts)?;
+                let sampler = ConditionalCRPSampler::new(theta, n, k, Some(ic))?;
+                run_test(sampler, tc, Some(ic), &opts)?;
             }
         } else {
             let theta = theta_mle(n, k, None);
@@ -180,7 +180,7 @@ struct Opts {
 }
 
 /// run sampler and print configurations to stdout
-fn run_sampler(sampler: impl Sampler, samples: usize, seed: u64, quiet: bool) -> Result<()> {
+fn run_sampler(sampler: impl Sampler<Pcg64>, samples: usize, seed: u64, quiet: bool) -> Result<()> {
     let mut rng = Pcg64::seed_from_u64(seed);
     let stdout = std::io::stdout();
     let mut stdout = stdout.lock();
@@ -216,7 +216,7 @@ fn run_sampler(sampler: impl Sampler, samples: usize, seed: u64, quiet: bool) ->
 
 /// run sampler and test specific configuration
 fn run_test(
-    sampler: impl Sampler,
+    sampler: impl Sampler<Pcg64>,
     test_configuration: &Configuration,
     ic: Option<&Configuration>,
     opts: &Opts,
@@ -236,8 +236,8 @@ fn run_test(
     // writing this non-generically for now
     // if MAYBE we make more tests, we can have a
     // list of "dyn Test"s and go over them
-    let s = SlatkinTest::new(&test_configuration);
-    let w = WattersonTest::new(&test_configuration);
+    let s = SlatkinTest::new(test_configuration);
+    let w = WattersonTest::new(test_configuration);
 
     let mut s_total: usize = 0;
     let mut w_total: usize = 0;
