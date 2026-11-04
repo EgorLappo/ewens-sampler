@@ -8,7 +8,8 @@ use std::io::Write;
 
 use ewens_sampler::{Sampler,Configuration};
 use ewens_sampler::ew_sampler::{
-    BiasedCRPSampler, ConditionalCRPSampler, FellerSampler, FellerSamplerK
+    BiasedCRPSampler, ConditionalCRPSampler, FellerSampler, FellerSamplerK,
+    check_initial_configuration,
 };
 use ewens_sampler::stats::{SlatkinTest, Test, WattersonTest};
 
@@ -27,6 +28,8 @@ fn main() -> Result<()> {
 
         // do we have an initial configuration or not
         if let Some(ref ic) = opts.initial_configuration {
+            // validate before theta_mle sees it
+            check_initial_configuration(n, k, ic)?;
             let n0 = ic.n();
             let k0 = ic.k();
             let theta = ewens_sampler::ew_sampler::theta::theta_mle(n, k, Some((n0, k0)));
@@ -64,6 +67,8 @@ fn main() -> Result<()> {
 
             // if fixed k, do we have an initial configuration or not
             if let Some(ic) = opts.initial_configuration {
+                // validate before theta_mle sees it
+                check_initial_configuration(n, k, &ic)?;
                 let n0 = ic.n();
                 let k0 = ic.k();
                 let theta = ewens_sampler::ew_sampler::theta::theta_mle(n, k, Some((n0, k0)));

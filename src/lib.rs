@@ -54,3 +54,23 @@ impl std::fmt::Display for Configuration {
         write!(f, "{}", self.0.iter().format(" "))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_sorts_counts() {
+        let c: Configuration = " 3 1  2 ".parse().unwrap();
+        assert_eq!(c.0, [1, 2, 3]);
+        assert_eq!((c.n(), c.k()), (6, 3));
+        assert_eq!(c.to_string(), "1 2 3");
+    }
+
+    #[test]
+    fn parse_rejects_bad_input() {
+        for s in ["", "   ", "1 0 2", "1 x", "-1", "70000"] {
+            assert!(Configuration::parse(s).is_err(), "{s:?} parsed");
+        }
+    }
+}

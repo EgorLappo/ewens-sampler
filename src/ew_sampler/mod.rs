@@ -3,14 +3,16 @@ pub mod crp;
 pub mod feller;
 pub mod theta;
 
-pub use crp::{BiasedCRPSampler, CRPSamplerK, ConditionalCRPSampler};
+pub use crp::{
+    BiasedCRPSampler, CRPSamplerK, ConditionalCRPSampler, check_initial_configuration,
+};
 pub use feller::{FellerSampler, FellerSamplerK};
 
 // *conditional bernoulli sampling
 // see reference module below for the code that follows the
 // algorithm directly without logs
 #[inline]
-fn ln_add_exp(a: f64, b: f64) -> f64 {
+pub(crate) fn ln_add_exp(a: f64, b: f64) -> f64 {
     if a == f64::NEG_INFINITY {
         return b;
     }
@@ -228,5 +230,105 @@ mod reference {
         ans.push(s - csum);
 
         ans
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::SeedableRng;
+    use rand_pcg::Pcg64;
+
+    // all 0/1 sequences of length len
+    fn sequences(len: usize) -> impl Iterator<Item = Vec<usize>> {
+        (0..1usize << len).map(move |b| (0..len).map(|m| (b >> m) & 1).collect())
+    }
+
+    fn path_prob(p: &[f64], zs: &[usize]) -> f64 {
+        p.iter()
+            .zip(zs)
+            .map(|(&pm, &z)| if z == 1 { pm } else { 1.0 - pm })
+            .product()
+    }
+
+    // probability that the sum of variables j to n-1 is i, by enumeration
+    fn brute_q(p: &[f64], i: usize, j: usize) -> f64 {
+        sequences(p.len() - j)
+            .filter(|zs| zs.iter().sum::<usize>() == i)
+            .map(|zs| path_prob(&p[j..], &zs))
+            .sum()
+    }
+
+    // a few probability vectors, including the leading p = 1 of the conditional crp
+    fn test_ps() -> [Vec<f64>; 4] {
+        [
+            vec![0.3, 0.9, 0.05, 0.5, 0.7, 0.2],
+            (0..7).map(|j| 1.5 / (1.5 + j as f64)).collect(),
+            vec![0.999, 0.001, 0.6],
+            vec![0.4],
+        ]
+    }
+
+    #[test]
+    fn log_q_matches_brute_force() {
+        for p in test_ps() {
+            let n = p.len();
+            for s in 0..=n {
+                let lq = conditional_bernoulli_log_q(s, &p);
+                for i in 0..=s {
+                    for j in 0..n {
+                        let (got, want) = (lq[i * n + j].exp(), brute_q(&p, i, j));
+                        assert!(
+                            (got - want).abs() < 1e-12,
+                            "{p:?} s={s} i={i} j={j}: {got} vs {want}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn probs_match_brute_force() {
+        for p in test_ps() {
+            let n = p.len();
+            for s in 1..=n {
+                let probs = conditional_bernoulli_probs(s, &p);
+                for i in 1..=s {
+                    for j in 0..=(n - i) {
+                        let denom = brute_q(&p, i, j);
+                        if denom == 0.0 {
+                            // the sampler never gets here
+                            continue;
+                        }
+                        let want = p[j] * brute_q(&p, i - 1, j + 1) / denom;
+                        let got = probs[(i - 1) * n + j];
+                        assert!(
+                            (got - want).abs() < 1e-12,
+                            "{p:?} s={s} i={i} j={j}: {got} vs {want}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // every sample should sum to s and be a possible outcome,
+    // e.g. variables with p = 1 always come out as 1
+    #[test]
+    fn samples_are_possible_and_sum_to_s() {
+        let mut rng = Pcg64::seed_from_u64(1);
+        for p in test_ps() {
+            let n = p.len();
+            for s in (0..=n).filter(|&s| brute_q(&p, s, 0) > 0.0) {
+                let probs = conditional_bernoulli_probs(s, &p);
+                for _ in 0..500 {
+                    let zs = conditional_bernoulli_sample(n, s, &probs, &mut rng);
+                    assert_eq!(zs.len(), n);
+                    assert_eq!(zs.iter().sum::<usize>(), s, "{p:?} s={s}: {zs:?}");
+                    assert!(path_prob(&p, &zs) > 0.0, "{p:?} s={s}: impossible {zs:?}");
+                }
+            }
+        }
     }
 }

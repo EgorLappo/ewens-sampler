@@ -1,7 +1,8 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use ewinfer::sampler::*;
+use ewens_sampler::Sampler;
+use ewens_sampler::ew_sampler::{CRPSamplerK, FellerSamplerK};
 use rand::{SeedableRng, rngs::SmallRng};
 
 // this is a sanity check for implementations:
@@ -14,7 +15,7 @@ pub fn feller_theta_comparison_small(c: &mut Criterion) {
     let mut group = c.benchmark_group("theta_comparison_small");
 
     for theta in [0.01, 0.5, 1.0, 5.0, 10.0, 25.0, 100.0].into_iter() {
-        let feller = FellerSamplerK::new(black_box(theta), black_box(n), black_box(k));
+        let feller = FellerSamplerK::new(black_box(theta), black_box(n), black_box(k)).unwrap();
         let mut rng = SmallRng::seed_from_u64(123);
 
         group.bench_with_input(BenchmarkId::from_parameter(theta), &theta, |b, _theta| {
@@ -38,7 +39,7 @@ pub fn feller_theta_comparison_large(c: &mut Criterion) {
     let mut group = c.benchmark_group("theta_comparison_large");
 
     for theta in [0.01, 0.5, 1.0, 5.0, 10.0, 25.0, 100.0].into_iter() {
-        let feller = FellerSamplerK::new(black_box(theta), black_box(n), black_box(k));
+        let feller = FellerSamplerK::new(black_box(theta), black_box(n), black_box(k)).unwrap();
         let mut rng = SmallRng::seed_from_u64(123);
 
         group.bench_with_input(BenchmarkId::from_parameter(theta), &theta, |b, _theta| {
@@ -54,7 +55,7 @@ pub fn feller_crp_comparison(c: &mut Criterion) {
 
     let (n, k) = (265, 81);
     let mut rng = SmallRng::seed_from_u64(123);
-    let feller = FellerSamplerK::new(black_box(1.0), black_box(n), black_box(k));
+    let feller = FellerSamplerK::new(black_box(1.0), black_box(n), black_box(k)).unwrap();
     let crp = CRPSamplerK::new(black_box(1.0), black_box(n), black_box(k));
 
     group.bench_function("feller", |b| b.iter(|| feller.sample(&mut rng)));
@@ -68,7 +69,7 @@ pub fn feller_crp_comparison(c: &mut Criterion) {
 pub fn bench_feller(c: &mut Criterion) {
     let (n, k) = (265, 81);
     let mut rng = SmallRng::seed_from_u64(231);
-    let feller = FellerSamplerK::new(black_box(1.0), black_box(n), black_box(k));
+    let feller = FellerSamplerK::new(black_box(1.0), black_box(n), black_box(k)).unwrap();
 
     c.bench_function("feller", |b| b.iter(|| feller.sample(&mut rng)));
 }

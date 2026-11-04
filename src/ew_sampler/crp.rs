@@ -83,6 +83,42 @@ fn crp_bernoulli_p(n: usize, theta: f64) -> Box<[f64]> {
     (2..=n).map(|j| theta / (theta + (j as f64) - 1.)).collect()
 }
 
+/// check that n samples with k alleles can be reached from an initial configuration.
+/// callers that use the configuration before building a sampler (like theta_mle) need
+/// to run this first
+pub fn check_initial_configuration(n: usize, k: usize, ic: &Configuration) -> Result<()> {
+    if ic.k() > k {
+        bail!(
+            "provided initial configuration '{}' has {}>k={} entries",
+            ic,
+            ic.k(),
+            k
+        );
+    }
+
+    if ic.n() >= n {
+        bail!(
+            "sum of entries of initial configuration '{}' is {}>=n={}",
+            ic,
+            ic.n(),
+            n
+        );
+    }
+
+    // the remaining samples have to be able to start all the new alleles
+    if k - ic.k() > n - ic.n() {
+        bail!(
+            "provided initial configuration '{}' needs {} new alleles to reach k={}, but only {} samples are left",
+            ic,
+            k - ic.k(),
+            k,
+            n - ic.n()
+        );
+    }
+
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 pub struct ConditionalCRPSampler {
     pub theta: f64,
@@ -108,23 +144,7 @@ impl ConditionalCRPSampler {
         }
 
         let conf_init = if let Some(ic) = initial_configuration {
-            if k - ic.k() > n - ic.n() {
-                bail!(
-                    "provided initial configuration '{}' has  {}>k={} entries",
-                    ic,
-                    ic.k(),
-                    k
-                );
-            }
-
-            if ic.n() >= n {
-                bail!(
-                    "sum of entries of initial configuration '{}' is {}>=n={}",
-                    ic,
-                    ic.n(),
-                    n
-                );
-            }
+            check_initial_configuration(n, k, ic)?;
             ic.0.clone()
         } else {
             // empty initial configuration means we sample as usual

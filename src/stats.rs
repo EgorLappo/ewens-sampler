@@ -40,7 +40,12 @@ impl Test for SlatkinTest {
         let lp_c = slatkin_statistic(tconf);
         // now we want to test if P(c|k) <= P(c_0|k)
         //   in -log-p, we test -log P(c|k) >= -log P(c_0|k)
-        lp_c >= self.0
+        // equally probable configurations like (2, 2, 10) and (1, 5, 8) can still differ in
+        // the last bits of their sums of logs, and those ties belong in the tail.
+        // two sums of k nonnegative logs differ by at most ~(k + 1) * EPSILON relative
+        // from rounding, so lower the target by a few times that
+        let tol = 4.0 * tconf.len() as f64 * f64::EPSILON * self.0;
+        lp_c >= self.0 - tol
     }
 }
 

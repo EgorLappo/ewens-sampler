@@ -1,0 +1,8 @@
+# run with `cargo nextest run` (in the dev shell)
+
+[profile.default]
+# keep going after a failure, so one run shows every broken sampler
+fail-fast = false
+# the distribution tests draw ~1e5 configurations each and take a few seconds,
+# so anything still running after two minutes is stuck
+slow-timeout = { period = "30s", terminate-after = 4 }
