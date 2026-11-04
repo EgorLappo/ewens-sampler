@@ -4,7 +4,7 @@ mod common;
 
 use common::{
     Law, assert_fits, biased_crp_law, esf_law, factorial, given_k, multiplicity_factorials,
-    partitions, py_crp_law, py_law,
+    partitions, py_crp_law, py_free_law, py_law,
 };
 use ewens_sampler::Configuration;
 use ewens_sampler::samplers::Sampler;
@@ -12,13 +12,28 @@ use ewens_sampler::samplers::ewens::theta::theta_mle;
 use ewens_sampler::samplers::ewens::{
     BiasedCRPSampler, CRPSamplerK, ConditionalCRPSampler, FellerSampler, FellerSamplerK,
 };
-use ewens_sampler::samplers::pitman_yor::{PYSamplerK, default_theta};
+use ewens_sampler::samplers::pitman_yor::{PYSampler, PYSamplerK, default_theta};
 use ewens_sampler::stats::watterson_statistic;
 use rand::SeedableRng;
 use rand_pcg::Pcg64;
 
 // conditional on k the results should not depend on theta, so every sampler is run with both values
 const THETAS: [f64; 2] = [0.3, 8.0];
+
+// (theta, alpha) for pitman-yor without conditioning on k, where theta > -alpha, or theta = m |alpha|
+// with m types for alpha < 0. these m |alpha| are exact in floating point, so the restaurant
+// in common stops at m tables exactly. the last two have a single possible configuration
+const PY_FREE: [(f64, f64); 9] = [
+    (1.0, 0.0),
+    (2.0, 0.5),
+    (-0.3, 0.6),
+    (0.5, 0.9),
+    (1.5, -0.5),
+    (10.0, -2.0),
+    (30.0, -2.5),
+    (2.0, -2.0),
+    (3.0, 1.0),
+];
 
 fn conf(counts: &[u16]) -> Configuration {
     let s: Vec<String> = counts.iter().map(u16::to_string).collect();
@@ -50,6 +65,15 @@ fn restaurant_matches_closed_form() {
         }
     }
     assert_close(&py_crp_law(7, 1.7, 0.0, &[]), &esf_law(7, 1.7));
+
+    // and without conditioning, where theta stays
+    for (theta, alpha) in PY_FREE {
+        assert_close(
+            &py_crp_law(8, theta, alpha, &[]),
+            &py_free_law(8, theta, alpha),
+        );
+    }
+    assert_close(&py_free_law(7, 1.7, 0.0), &esf_law(7, 1.7));
 }
 
 // at alpha = -1 every unordered configuration (every way of giving the counts to the k alleles)
@@ -172,6 +196,16 @@ fn pitman_yor_k_fits_exact_law_for_negative_alpha() {
     fits_py_law_for_any_theta(&[-0.5, -1.0, -2.0, f64::NEG_INFINITY]);
 }
 
+#[test]
+fn pitman_yor_fits_unconditional_law() {
+    let n = 10;
+    for (theta, alpha) in PY_FREE {
+        let label = format!("pitman-yor alpha={alpha} theta={theta}");
+        let law = py_free_law(n, theta, alpha);
+        assert_fits(&label, &PYSampler::new(theta, alpha, n), &law, 1);
+    }
+}
+
 fn fits_py_law_for_any_theta(alphas: &[f64]) {
     for &alpha in alphas {
         // the last two have a single possible configuration
@@ -265,8 +299,8 @@ fn samplers_agree_at_large_n() {
     }
 }
 
-// for alpha > 0 there is no other sampler to compare to at these sizes,
-// but the law given k still must not depend on theta
+// for alpha > 0 there is no other conditional sampler to compare to at these sizes
+// (but see the rejection check below), and the law given k still must not depend on theta
 #[test]
 fn pitman_yor_free_of_theta_at_large_n() {
     let (n, k, samples) = (265, 81, 20_000);
@@ -278,6 +312,72 @@ fn pitman_yor_free_of_theta_at_large_n() {
             let name = format!("pitman-yor alpha={alpha}, theta {theta} vs {}", thetas[0]);
             assert_same_summary(&name, reference, other, samples);
         }
+    }
+}
+
+// mean and variance of the number of alleles after n customers. the next customer opens a table
+// w.p. (theta + alpha k_j) / (theta + j), which is linear in k_j, so the moments follow
+//   E k_(j+1) = E k_j + (theta + alpha E k_j) / (theta + j)
+//   E k_(j+1)^2 = E k_j^2 + E (2 k_j + 1)(theta + alpha k_j) / (theta + j)
+fn k_moments(n: usize, theta: f64, alpha: f64) -> (f64, f64) {
+    // one customer at one table
+    let (mut m1, mut m2) = (1.0, 1.0);
+    for j in 1..n {
+        let d = theta + j as f64;
+        (m1, m2) = (
+            m1 + (theta + alpha * m1) / d,
+            m2 + (theta + (2.0 * theta + alpha) * m1 + 2.0 * alpha * m2) / d,
+        );
+    }
+    (m1, m2 - m1 * m1)
+}
+
+// draws from a free-k sampler until one has k alleles
+struct GivenK<S>(S, usize);
+
+impl<S: Sampler<Pcg64>> Sampler<Pcg64> for GivenK<S> {
+    fn sample(&self, rng: &mut Pcg64) -> Vec<u16> {
+        loop {
+            let c = self.0.sample(rng);
+            if c.len() == self.1 {
+                break c;
+            }
+        }
+    }
+
+    fn theta(&self) -> f64 {
+        self.0.theta()
+    }
+}
+
+// at these sizes the free sampler should still get the number of alleles right on average,
+// and given k it should be PYSamplerK, which we can check by keeping its draws with k alleles.
+// both have k around n / 5, as with mostly singletons the summaries can't tell laws apart
+#[test]
+fn pitman_yor_given_k_agrees_at_large_n() {
+    // smaller than above, as with k free only 1 in 25 or 1 in 5 draws has the k we keep
+    let (n, samples) = (120, 5_000);
+    for (theta, alpha) in [(1.0, 0.5), (30.0, -1.0)] {
+        let label = format!("pitman-yor alpha={alpha} theta={theta}");
+        let sampler = PYSampler::new(theta, alpha, n);
+
+        let (mean, var) = k_moments(n, theta, alpha);
+        let mut rng = Pcg64::seed_from_u64(1);
+        let k_bar = (0..samples)
+            .map(|_| sampler.sample(&mut rng).len() as f64)
+            .sum::<f64>()
+            / samples as f64;
+        let z = (k_bar - mean) / (var / samples as f64).sqrt();
+        assert!(
+            z.abs() < 5.0,
+            "{label}: mean k {k_bar:.2} vs {mean:.2} (z = {z:.1})"
+        );
+
+        // the expected k is about the most likely one, so rejection doesn't take too long
+        let k = mean.round() as usize;
+        let reference = summary(&PYSamplerK::new(theta, alpha, n, k), samples, 2);
+        let other = summary(&GivenK(sampler, k), samples, 3);
+        assert_same_summary(&format!("{label} given k={k}"), reference, other, samples);
     }
 }
 
@@ -349,10 +449,31 @@ fn unconditional_samples_sum_to_n() {
     let mut rng = Pcg64::seed_from_u64(1);
     for n in [1, 2, 7, 120] {
         for theta in [0.05, 1.0, 30.0] {
-            let sampler = FellerSampler::new(theta, n);
-            for _ in 0..200 {
-                let c = sampler.sample(&mut rng);
-                assert_valid(&format!("feller n={n} theta={theta}"), &c, n, c.len());
+            // with the most alleles each can give
+            let samplers: [(&str, Box<dyn Sampler<Pcg64>>, usize); 5] = [
+                ("feller", Box::new(FellerSampler::new(theta, n)), n),
+                ("pitman-yor 0.5", Box::new(PYSampler::new(theta, 0.5, n)), n),
+                ("pitman-yor 1", Box::new(PYSampler::new(theta, 1.0, n)), n),
+                // these ignore the theta of the loop, as for alpha < 0 it has to be m |alpha|
+                // for m types, and then there are at most m alleles
+                (
+                    "pitman-yor -0.5, 3 types",
+                    Box::new(PYSampler::new(1.5, -0.5, n)),
+                    3,
+                ),
+                (
+                    "pitman-yor -2, 50 types",
+                    Box::new(PYSampler::new(100.0, -2.0, n)),
+                    50,
+                ),
+            ];
+            for (name, sampler, max_k) in samplers {
+                for _ in 0..200 {
+                    let c = sampler.sample(&mut rng);
+                    let label = format!("{name} n={n} theta={theta}");
+                    assert_valid(&label, &c, n, c.len());
+                    assert!(c.len() <= max_k, "{label}: {c:?} has over {max_k} alleles");
+                }
             }
         }
     }
@@ -403,6 +524,31 @@ fn constructors_reject_invalid_parameters() {
         assert!(
             BiasedCRPSampler::new(1.0, 5, 2, bias, None).is_err(),
             "bias {bias}"
+        );
+    }
+}
+
+// PYSampler::new panics instead, like PYSamplerK
+#[test]
+fn pitman_yor_rejects_invalid_parameters() {
+    for (theta, alpha, n) in [
+        // for alpha < 0, theta / |alpha| has to be a whole number of types, at least 1
+        (2.5, -1.0, 10),
+        (0.0, -1.0, 10),
+        // which alpha = -inf can't have
+        (f64::INFINITY, f64::NEG_INFINITY, 10),
+        // otherwise theta > -alpha, and alpha <= 1
+        (-0.5, 0.5, 10),
+        (1.0, 1.5, 10),
+        (f64::INFINITY, 0.5, 10),
+        (f64::NAN, 0.5, 10),
+        (1.0, f64::NAN, 10),
+        (1.0, 0.5, 0),
+    ] {
+        let made = std::panic::catch_unwind(|| PYSampler::new(theta, alpha, n));
+        assert!(
+            made.is_err(),
+            "theta={theta} alpha={alpha} n={n} was accepted"
         );
     }
 }

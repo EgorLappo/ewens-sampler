@@ -1,7 +1,7 @@
-use rand::{Rng, RngExt};
-use rand_pcg::Pcg64;
-
 use super::{Sampler, conditional_bernoulli_sample, ln_add_exp};
+use rand::{Rng, RngExt};
+
+mod theta;
 
 // helpers for sampling from the pitman yor distribution given
 // values of n, k, and alpha
@@ -187,13 +187,140 @@ fn conditional_bernoulli_probs(n: usize, s: usize, theta: f64, alpha: f64) -> Bo
     probs.into_boxed_slice()
 }
 
-// TODO: next, can we do this by Feller coupling?
+// the chinese restaurant shared by both samplers: n customers end up at k tables, with zetas
+// for the customers after the first saying who opens a new one, and everyone else joining
+// a table of size n_c with probability proportional to n_c - alpha
+fn seat<R: Rng>(n: usize, k: usize, alpha: f64, zetas: &[usize], rng: &mut R) -> Vec<u16> {
+    // in the chinese restaurant process, the configuration is built
+    // sample-by sample
+
+    // assignment of samples to cycles
+    let mut assignment = vec![0; n];
+    // first element must go into the first cycle
+    assignment[0] = 0;
+
+    // variables to keep track of progress
+    let mut cycle = 0;
+
+    let mut configuration = vec![0; k];
+    configuration[cycle] += 1;
+
+    for (samples_assigned, s) in (1..).zip(zetas.iter()) {
+        if *s == 0 {
+            // if s == 0, we must place the sample in an existing cycle c,
+            // but now with probability proportional to n_c - alpha.
+            // a randomly chosen previous sample is in cycle c w.p. n_c / samples_assigned
+            let cycle_choice = if alpha >= 0.0 {
+                // so for alpha >= 0 we keep its cycle w.p. (n_c - alpha) / n_c and
+                // otherwise choose again, which works out at least a (1 - alpha) fraction of the time
+                loop {
+                    let choice = rng.random_range(..samples_assigned);
+                    let c = assignment[choice];
+                    let size = configuration[c] as f64;
+                    if rng.random::<f64>() * size < size - alpha {
+                        break c;
+                    }
+                }
+            } else {
+                // for alpha < 0, n_c - alpha = n_c + |alpha| is more than n_c, so instead mix
+                // copying a randomly chosen previous sample (total weight samples_assigned)
+                // with choosing one of the cycle + 1 cycles uniformly (total weight (cycle + 1) |alpha|).
+                // at alpha = -inf this is always uniform
+                let p_copy = samples_assigned as f64
+                    / (samples_assigned as f64 - (cycle + 1) as f64 * alpha);
+                if rng.random::<f64>() < p_copy {
+                    assignment[rng.random_range(..samples_assigned)]
+                } else {
+                    rng.random_range(..=cycle)
+                }
+            };
+            assignment[samples_assigned] = cycle_choice;
+
+            // increment configuration
+            configuration[cycle_choice] += 1;
+        } else {
+            // if s == 1, we must start a new cycle
+            cycle += 1;
+            assignment[samples_assigned] = cycle;
+
+            // increment configuration
+            configuration[cycle] += 1;
+        }
+    }
+
+    configuration
+}
+
+// free k: without conditioning, the zetas are the restaurant's own and are drawn one at a time,
+// then the customers are seated as in PYSamplerK.
+//
+// feller coupling doesn't carry over. it builds the configuration one allele at a time,
+// and in ewens the current allele stops growing w.p. theta / (theta + r) with r samples left,
+// so the stops are independent bernoullis and the counts are the spacings between them.
+// under pitman-yor the allele of the first sample still has
+// 1 + betabinomial(n - 1; 1 - alpha, theta + alpha) copies, with pitman-yor (alpha, theta + alpha)
+// for the rest, but its stopping probabilities only come out in closed form at alpha = 0
 #[derive(Debug, Clone)]
 pub struct PYSampler {
     pub theta: f64,
     pub alpha: f64,
     pub n: usize,
-    p: Box<[f64]>,
+    // the most tables there can be: m for alpha < 0, where theta = m |alpha|, and n otherwise
+    max_k: usize,
+}
+
+impl PYSampler {
+    pub fn new(theta: f64, alpha: f64, n: usize) -> Self {
+        assert!(
+            n >= 1 && alpha > f64::NEG_INFINITY && alpha <= 1.0,
+            "PYSampler: need n >= 1 and -inf < alpha <= 1, got n={n}, alpha={alpha}"
+        );
+        let max_k = if alpha < 0.0 {
+            // the finite dirichlet case with m types, where zeta is 0 once all m are seen.
+            // any other theta would give negative probabilities
+            let m = theta / -alpha;
+            assert!(
+                m.is_finite() && m.round() >= 1.0 && (m - m.round()).abs() <= 1e-9 * m,
+                "PYSampler: for alpha < 0, theta / |alpha| has to be a whole number of types, got theta={theta}, alpha={alpha}"
+            );
+            m.round() as usize
+        } else {
+            assert!(
+                theta.is_finite() && theta + alpha > 0.0,
+                "PYSampler: need theta > -alpha, got theta={theta}, alpha={alpha}"
+            );
+            n
+        };
+        Self {
+            theta,
+            alpha,
+            n,
+            max_k,
+        }
+    }
+}
+
+impl<R: Rng> Sampler<R> for PYSampler {
+    fn sample(&self, rng: &mut R) -> Vec<u16> {
+        // the zetas of py_zetas: variable j is for the customer who finds j + 1 customers
+        // already seated at x + 1 tables, where x is the sum of the variables before it
+        let mut x = 0;
+        let zetas: Vec<usize> = (0..self.n - 1)
+            .map(|j| {
+                let p =
+                    (self.theta + ((x + 1) as f64) * self.alpha) / (self.theta + ((j + 1) as f64));
+                let z = (x + 1 < self.max_k && rng.random::<f64>() < p) as usize;
+                x += z;
+                z
+            })
+            .collect();
+
+        seat(self.n, x + 1, self.alpha, &zetas, rng)
+    }
+
+    fn theta(&self) -> f64 {
+        self.theta
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -211,7 +338,8 @@ impl PYSamplerK {
         // zetas for customers 2..=n, like crp_bernoulli_p in ewens
         // (first one is forced to be 1)
         let n_vars = n - 1;
-        // conditioned ones, except at alpha = 1, where the configuration is fixed (see sample)
+        // conditioned ones, except at alpha = 1, where the most balanced configuration
+        // is the only possible one (nothing to sample)
         let probs = if alpha == 1.0 {
             Vec::new().into_boxed_slice()
         } else {
@@ -239,65 +367,7 @@ impl<R: Rng> Sampler<R> for PYSamplerK {
         }
 
         let zetas = conditional_bernoulli_sample(self.n_vars, self.k - 1, &self.probs, rng);
-
-        // in the chinese restaurant process, the configuration is built
-        // sample-by sample
-
-        // assignment of samples to cycles
-        let mut assignment = vec![0; self.n];
-        // first element must go into the first cycle
-        assignment[0] = 0;
-
-        // variables to keep track of progress
-        let mut cycle = 0;
-
-        let mut configuration = vec![0; self.k];
-        configuration[cycle] += 1;
-
-        for (samples_assigned, s) in (1..).zip(zetas.iter()) {
-            if *s == 0 {
-                // if s == 0, we must place the sample in an existing cycle c,
-                // but now with probability proportional to n_c - alpha.
-                // a randomly chosen previous sample is in cycle c w.p. n_c / samples_assigned
-                let cycle_choice = if self.alpha >= 0.0 {
-                    // so for alpha >= 0 we keep its cycle w.p. (n_c - alpha) / n_c and
-                    // otherwise choose again, which works out at least a (1 - alpha) fraction of the time
-                    loop {
-                        let choice = rng.random_range(..samples_assigned);
-                        let c = assignment[choice];
-                        let size = configuration[c] as f64;
-                        if rng.random::<f64>() * size < size - self.alpha {
-                            break c;
-                        }
-                    }
-                } else {
-                    // for alpha < 0, n_c - alpha = n_c + |alpha| is more than n_c, so instead mix
-                    // copying a randomly chosen previous sample (total weight samples_assigned)
-                    // with choosing one of the cycle + 1 cycles uniformly (total weight (cycle + 1) |alpha|).
-                    // at alpha = -inf this is always uniform
-                    let p_copy = samples_assigned as f64
-                        / (samples_assigned as f64 - (cycle + 1) as f64 * self.alpha);
-                    if rng.random::<f64>() < p_copy {
-                        assignment[rng.random_range(..samples_assigned)]
-                    } else {
-                        rng.random_range(..=cycle)
-                    }
-                };
-                assignment[samples_assigned] = cycle_choice;
-
-                // increment configuration
-                configuration[cycle_choice] += 1;
-            } else {
-                // if s == 1, we must start a new cycle
-                cycle += 1;
-                assignment[samples_assigned] = cycle;
-
-                // increment configuration
-                configuration[cycle] += 1;
-            }
-        }
-
-        configuration
+        seat(self.n, self.k, self.alpha, &zetas, rng)
     }
 
     fn theta(&self) -> f64 {

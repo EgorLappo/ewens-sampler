@@ -69,20 +69,38 @@ pub fn py_law(n: usize, k: usize, alpha: f64) -> Law {
         return Law::from([(c, 1.0)]);
     }
     normalize(partitions(n, k).into_iter().map(|c| {
-        let w = c
-            .iter()
-            .map(|&m| {
-                let m = m as usize;
-                let rise = if alpha == f64::NEG_INFINITY {
-                    1.0
-                } else {
-                    rising(1.0 - alpha, m - 1)
-                };
-                rise / factorial(m)
-            })
-            .product::<f64>()
-            / multiplicity_factorials(&c);
+        let w = py_weight(&c, alpha);
         (c, w)
+    }))
+}
+
+// prod_b (1-alpha)_(c_b - 1) / c_b!  /  prod_j a_j!, which at alpha = -inf leaves out the |alpha|^(n-k)
+fn py_weight(c: &[u16], alpha: f64) -> f64 {
+    c.iter()
+        .map(|&m| {
+            let m = m as usize;
+            let rise = if alpha == f64::NEG_INFINITY {
+                1.0
+            } else {
+                rising(1.0 - alpha, m - 1)
+            };
+            rise / factorial(m)
+        })
+        .product::<f64>()
+        / multiplicity_factorials(c)
+}
+
+/// pitman-yor law without conditioning on k (pitman's sampling formula):
+///   P(c | n) ∝ prod_(i=1)^(k-1) (theta + i alpha) prod_b (1-alpha)_(c_b - 1) / c_b!  /  prod_j a_j!
+/// for alpha < 0 theta has to be m |alpha|, and then the first product rules out more than m alleles.
+/// impossible configurations are left out, so the law has exactly the possible ones
+pub fn py_free_law(n: usize, theta: f64, alpha: f64) -> Law {
+    normalize((1..=n).flat_map(|k| partitions(n, k)).filter_map(|c| {
+        let w = (1..c.len())
+            .map(|i| theta + i as f64 * alpha)
+            .product::<f64>()
+            * py_weight(&c, alpha);
+        (w > 0.0).then_some((c, w))
     }))
 }
 
@@ -99,7 +117,9 @@ pub fn esf_law(n: usize, theta: f64) -> Law {
 /// exact probability law of the configuration of a chinese restaurant after n customers,
 /// starting from tables `init`, computed by enumerating every seating.
 /// with j customers seated at x tables, the next one  opens a new table w.p. new_table(x, j),
-/// and otherwise joins a table of size c w.p. ∝ join(c)
+/// and otherwise joins a table of size c w.p. ∝ join(c).
+/// moves with probability 0 are left out, so the law has exactly the possible configurations
+/// (like a pitman-yor restaurant with alpha < 0 stopping at m tables, or alpha = 1 never joining one)
 fn seat(
     n: usize,
     init: &[u16],
@@ -115,17 +135,23 @@ fn seat(
         let mut next = Law::new();
         for (tables, &prob) in &states {
             let p_new = new_table(tables.len(), j);
-            let mut t = tables.clone();
-            t.push(1);
-            t.sort_unstable();
-            *next.entry(t).or_default() += prob * p_new;
+            if p_new > 0.0 {
+                let mut t = tables.clone();
+                t.push(1);
+                t.sort_unstable();
+                *next.entry(t).or_default() += prob * p_new;
+            }
 
             let total: f64 = tables.iter().map(|&c| join(c)).sum();
             for i in 0..tables.len() {
-                let mut t = tables.clone();
-                t[i] += 1;
-                t.sort_unstable();
-                *next.entry(t).or_default() += prob * (1.0 - p_new) * join(tables[i]) / total;
+                // with p_new = 1 this can be 0 / 0, which is NaN and also left out
+                let p_join = (1.0 - p_new) * join(tables[i]) / total;
+                if p_join > 0.0 {
+                    let mut t = tables.clone();
+                    t[i] += 1;
+                    t.sort_unstable();
+                    *next.entry(t).or_default() += prob * p_join;
+                }
             }
         }
         states = next;
