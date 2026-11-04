@@ -3,9 +3,7 @@ pub mod crp;
 pub mod feller;
 pub mod theta;
 
-pub use crp::{
-    BiasedCRPSampler, CRPSamplerK, ConditionalCRPSampler, check_initial_configuration,
-};
+pub use crp::{BiasedCRPSampler, CRPSamplerK, ConditionalCRPSampler, check_initial_configuration};
 pub use feller::{FellerSampler, FellerSamplerK};
 
 // *conditional bernoulli sampling
@@ -61,11 +59,7 @@ fn conditional_bernoulli_log_q(s: usize, p: &[f64]) -> Box<[f64]> {
     #[inline]
     fn at(lq: &[f64], n: usize, i: usize, j: usize) -> f64 {
         if j >= n {
-            if i == 0 {
-                0.0
-            } else {
-                f64::NEG_INFINITY
-            }
+            if i == 0 { 0.0 } else { f64::NEG_INFINITY }
         } else {
             lq[i * n + j]
         }

@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::{assert_fits, biased_crp_law, esf_law, given_k, partitions, py_crp_law, py_law, Law};
+use common::{Law, assert_fits, biased_crp_law, esf_law, given_k, partitions, py_crp_law, py_law};
 use ewens_sampler::ew_sampler::theta::theta_mle;
 use ewens_sampler::ew_sampler::{
     BiasedCRPSampler, CRPSamplerK, ConditionalCRPSampler, FellerSampler, FellerSamplerK,

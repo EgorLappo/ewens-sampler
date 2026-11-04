@@ -2,16 +2,16 @@ use clap::{ArgGroup, Parser};
 use color_eyre::eyre::Result;
 use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
-use rand::{SeedableRng};
+use rand::SeedableRng;
 use rand_pcg::Pcg64;
 use std::io::Write;
 
-use ewens_sampler::{Sampler,Configuration};
 use ewens_sampler::ew_sampler::{
     BiasedCRPSampler, ConditionalCRPSampler, FellerSampler, FellerSamplerK,
     check_initial_configuration,
 };
 use ewens_sampler::stats::{SlatkinTest, Test, WattersonTest};
+use ewens_sampler::{Configuration, Sampler};
 
 const PROGRESS_STYLE: &str =
     "{spinner:.purple} [{elapsed}/{duration}] [{bar:.cyan/blue}] {human_pos}/{human_len}";
