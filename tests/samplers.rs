@@ -2,14 +2,17 @@
 
 mod common;
 
-use common::{Law, assert_fits, biased_crp_law, esf_law, given_k, partitions, py_crp_law, py_law};
+use common::{
+    Law, assert_fits, biased_crp_law, esf_law, factorial, given_k, multiplicity_factorials,
+    partitions, py_crp_law, py_law,
+};
 use ewens_sampler::Configuration;
 use ewens_sampler::samplers::Sampler;
 use ewens_sampler::samplers::ewens::theta::theta_mle;
 use ewens_sampler::samplers::ewens::{
     BiasedCRPSampler, CRPSamplerK, ConditionalCRPSampler, FellerSampler, FellerSamplerK,
 };
-use ewens_sampler::samplers::pitman_yor::PYSamplerK;
+use ewens_sampler::samplers::pitman_yor::{PYSamplerK, default_theta};
 use ewens_sampler::stats::watterson_statistic;
 use rand::SeedableRng;
 use rand_pcg::Pcg64;
@@ -35,8 +38,10 @@ fn assert_close(a: &Law, b: &Law) {
 fn restaurant_matches_closed_form() {
     for (n, k) in [(7, 1), (8, 3), (10, 4), (7, 7)] {
         assert_eq!(py_law(n, k, 0.0).len(), partitions(n, k).len());
-        for alpha in [0.0, 0.5] {
-            for theta in [0.4, 3.0] {
+        for alpha in [0.0, 0.5, -1.5] {
+            // negative alpha needs theta >= k |alpha|
+            let t = default_theta(k, alpha);
+            for theta in [t, t + 2.6] {
                 assert_close(
                     &given_k(py_crp_law(n, theta, alpha, &[]), k),
                     &py_law(n, k, alpha),
@@ -45,6 +50,24 @@ fn restaurant_matches_closed_form() {
         }
     }
     assert_close(&py_crp_law(7, 1.7, 0.0, &[]), &esf_law(7, 1.7));
+}
+
+// at alpha = -1 every unordered configuration (every way of giving the counts to the k alleles)
+// is equally likely, so P(c | n, k) is proportional to the k! / prod_j a_j! of them
+#[test]
+fn minus_one_is_uniform_over_unordered_configurations() {
+    for (n, k) in [(8, 3), (10, 4), (7, 7)] {
+        let per_unordered: Vec<f64> = py_law(n, k, -1.0)
+            .into_iter()
+            .map(|(c, p)| p / (factorial(k) / multiplicity_factorials(&c)))
+            .collect();
+        for w in &per_unordered {
+            assert!(
+                (w - per_unordered[0]).abs() < 1e-10 * per_unordered[0],
+                "n={n} k={k}: {per_unordered:?}"
+            );
+        }
+    }
 }
 
 // the check below has to be able to fail: ewens samples are far from a pitman-yor probability law
@@ -140,11 +163,26 @@ fn biased_crp_fits_exact_law() {
 // for any theta > -alpha
 #[test]
 fn pitman_yor_k_fits_exact_law() {
-    for alpha in [0.0, 0.5, 0.9] {
+    // alpha = 1 is the limit with a single possible configuration
+    fits_py_law_for_any_theta(&[0.0, 0.5, 0.9, 1.0]);
+}
+
+#[test]
+fn pitman_yor_k_fits_exact_law_for_negative_alpha() {
+    fits_py_law_for_any_theta(&[-0.5, -1.0, -2.0, f64::NEG_INFINITY]);
+}
+
+fn fits_py_law_for_any_theta(alphas: &[f64]) {
+    for &alpha in alphas {
         // the last two have a single possible configuration
         for (n, k) in [(10, 4), (9, 2), (7, 1), (6, 6)] {
             let law = py_law(n, k, alpha);
-            for theta in THETAS.into_iter().chain((alpha > 0.4).then_some(-0.4)) {
+            // theta has to be > -alpha, and >= k |alpha| for alpha < 0
+            let t = default_theta(k, alpha);
+            for theta in [t, t + 7.7]
+                .into_iter()
+                .chain((alpha > 0.4).then_some(-0.4))
+            {
                 let sampler = PYSamplerK::new(theta, alpha, n, k);
                 let label = format!("pitman-yor alpha={alpha} n={n} k={k} theta={theta}");
                 assert_fits(&label, &sampler, &law, 1);
@@ -231,12 +269,15 @@ fn samplers_agree_at_large_n() {
 // but the law given k still must not depend on theta
 #[test]
 fn pitman_yor_free_of_theta_at_large_n() {
-    let (n, k, samples, alpha) = (265, 81, 20_000, 0.5);
-    let reference = summary(&PYSamplerK::new(1.0, alpha, n, k), samples, 1);
-    for (seed, theta) in [(2, -0.4), (3, 50.0)] {
-        let other = summary(&PYSamplerK::new(theta, alpha, n, k), samples, seed);
-        let name = format!("pitman-yor alpha={alpha}, theta {theta} vs 1");
-        assert_same_summary(&name, reference, other, samples);
+    let (n, k, samples) = (265, 81, 20_000);
+    // a reference theta and two others for each alpha, the smallest valid ones first
+    for (alpha, thetas) in [(0.5, [1.0, -0.4, 50.0]), (-1.0, [82.0, 200.0, 1000.0])] {
+        let reference = summary(&PYSamplerK::new(thetas[0], alpha, n, k), samples, 1);
+        for (seed, &theta) in (2..).zip(&thetas[1..]) {
+            let other = summary(&PYSamplerK::new(theta, alpha, n, k), samples, seed);
+            let name = format!("pitman-yor alpha={alpha}, theta {theta} vs {}", thetas[0]);
+            assert_same_summary(&name, reference, other, samples);
+        }
     }
 }
 
@@ -259,7 +300,7 @@ fn samples_have_k_alleles_summing_to_n() {
         ks.dedup();
         for k in ks {
             for theta in [0.05, 1.0, 30.0] {
-                let samplers: [(&str, Box<dyn Sampler<Pcg64>>); 6] = [
+                let samplers: [(&str, Box<dyn Sampler<Pcg64>>); 9] = [
                     (
                         "feller",
                         Box::new(FellerSamplerK::new(theta, n, k).unwrap()),
@@ -268,6 +309,16 @@ fn samples_have_k_alleles_summing_to_n() {
                         "pitman-yor 0.5",
                         Box::new(PYSamplerK::new(theta, 0.5, n, k)),
                     ),
+                    // these ignore the theta of the loop, which isn't valid for them
+                    (
+                        "pitman-yor -1",
+                        Box::new(PYSamplerK::new(default_theta(k, -1.0), -1.0, n, k)),
+                    ),
+                    (
+                        "pitman-yor -inf",
+                        Box::new(PYSamplerK::new(f64::INFINITY, f64::NEG_INFINITY, n, k)),
+                    ),
+                    ("pitman-yor 1", Box::new(PYSamplerK::new(1.0, 1.0, n, k))),
                     ("crp", Box::new(CRPSamplerK::new(theta, n, k))),
                     (
                         "conditional crp",

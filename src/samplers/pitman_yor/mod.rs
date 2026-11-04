@@ -23,15 +23,32 @@ use super::{Sampler, conditional_bernoulli_sample, ln_add_exp};
 // we use it flattened, with shape (s+1)*n, so p[x, j] is p[n * x + j]
 // only x <= j is reachable (the j variables before j can't sum to more),
 // the rest stay at 0 so they are valid probabilities that never get used
-// NOTE: needs theta > -alpha and 0 <= alpha < 1 for p[x, j] to be in (0, 1) when x <= j
+//
+// NOTE: for p[x, j] to be in [0, 1] when x <= j we need alpha < 1 and theta + alpha > 0,
+// and for alpha < 0 also theta + k alpha >= 0 with k = s + 1. that is the finite dirichlet case
+// theta = m |alpha| with at least m >= k types, and conditioning on k means we never get further.
+// alpha = -inf is handled as a limit, and alpha = 1 can't be reached this way (see PYSamplerK)
 fn py_zetas(n: usize, s: usize, theta: f64, alpha: f64) -> Box<[f64]> {
     assert!(s <= n, "py_zetas: sum > number of variables");
-    assert!(
-        theta > -alpha && (0.0..1.0).contains(&alpha),
-        "py_zetas: need theta > -alpha and 0 <= alpha < 1, got theta={theta}, alpha={alpha}"
-    );
 
     let mut p = vec![0.0; n * (s + 1)];
+
+    if alpha == f64::NEG_INFINITY {
+        // with theta = k |alpha| and alpha -> -inf, every customer picks one of k cells uniformly
+        // and opens a new table when the cell is empty, so it no longer depends on theta or j
+        for x in 0..=s {
+            for j in x..n {
+                p[n * x + j] = ((s - x) as f64) / ((s + 1) as f64);
+            }
+        }
+        return p.into_boxed_slice();
+    }
+
+    assert!(
+        alpha < 1.0 && theta + alpha > 0.0 && theta + ((s + 1) as f64) * alpha >= 0.0,
+        "py_zetas: need alpha < 1, theta > -alpha and theta >= -k alpha (k = {}), got theta={theta}, alpha={alpha}",
+        s + 1
+    );
 
     for x in 0..=s {
         for j in x..n {
@@ -40,6 +57,12 @@ fn py_zetas(n: usize, s: usize, theta: f64, alpha: f64) -> Box<[f64]> {
     }
 
     p.into_boxed_slice()
+}
+
+/// a theta that works for any alpha given k: theta cancels once we condition on k,
+/// but the probabilities in py_zetas need theta > -alpha and theta >= -k alpha
+pub fn default_theta(k: usize, alpha: f64) -> f64 {
+    1.0 + k as f64 * (-alpha).max(0.0)
 }
 
 // bernoulli zetas for the Pitman-Yor sampling
@@ -188,8 +211,12 @@ impl PYSamplerK {
         // zetas for customers 2..=n, like crp_bernoulli_p in ewens
         // (first one is forced to be 1)
         let n_vars = n - 1;
-        // conditioned ones
-        let probs = conditional_bernoulli_probs(n_vars, k - 1, theta, alpha);
+        // conditioned ones, except at alpha = 1, where the configuration is fixed (see sample)
+        let probs = if alpha == 1.0 {
+            Vec::new().into_boxed_slice()
+        } else {
+            conditional_bernoulli_probs(n_vars, k - 1, theta, alpha)
+        };
         Self {
             theta,
             alpha,
@@ -203,6 +230,14 @@ impl PYSamplerK {
 
 impl<R: Rng> Sampler<R> for PYSamplerK {
     fn sample(&self, rng: &mut R) -> Vec<u16> {
+        // as alpha -> 1 every allele with more than one copy gets a factor (1 - alpha) -> 0,
+        // so all the mass goes to the configuration with only one of them, (n - k + 1, 1, ..., 1)
+        if self.alpha == 1.0 {
+            let mut configuration = vec![1; self.k];
+            configuration[0] = (self.n - self.k + 1) as u16;
+            return configuration;
+        }
+
         let zetas = conditional_bernoulli_sample(self.n_vars, self.k - 1, &self.probs, rng);
 
         // in the chinese restaurant process, the configuration is built
@@ -223,15 +258,29 @@ impl<R: Rng> Sampler<R> for PYSamplerK {
             if *s == 0 {
                 // if s == 0, we must place the sample in an existing cycle c,
                 // but now with probability proportional to n_c - alpha.
-                // a randomly chosen previous sample is in cycle c w.p. n_c / samples_assigned,
-                // so we keep its cycle w.p. (n_c - alpha) / n_c and otherwise choose again,
-                // which works out at least a (1 - alpha) fraction of the time
-                let cycle_choice = loop {
-                    let choice = rng.random_range(..samples_assigned);
-                    let c = assignment[choice];
-                    let size = configuration[c] as f64;
-                    if rng.random::<f64>() * size < size - self.alpha {
-                        break c;
+                // a randomly chosen previous sample is in cycle c w.p. n_c / samples_assigned
+                let cycle_choice = if self.alpha >= 0.0 {
+                    // so for alpha >= 0 we keep its cycle w.p. (n_c - alpha) / n_c and
+                    // otherwise choose again, which works out at least a (1 - alpha) fraction of the time
+                    loop {
+                        let choice = rng.random_range(..samples_assigned);
+                        let c = assignment[choice];
+                        let size = configuration[c] as f64;
+                        if rng.random::<f64>() * size < size - self.alpha {
+                            break c;
+                        }
+                    }
+                } else {
+                    // for alpha < 0, n_c - alpha = n_c + |alpha| is more than n_c, so instead mix
+                    // copying a randomly chosen previous sample (total weight samples_assigned)
+                    // with choosing one of the cycle + 1 cycles uniformly (total weight (cycle + 1) |alpha|).
+                    // at alpha = -inf this is always uniform
+                    let p_copy = samples_assigned as f64
+                        / (samples_assigned as f64 - (cycle + 1) as f64 * self.alpha);
+                    if rng.random::<f64>() < p_copy {
+                        assignment[rng.random_range(..samples_assigned)]
+                    } else {
+                        rng.random_range(..=cycle)
                     }
                 };
                 assignment[samples_assigned] = cycle_choice;
@@ -286,6 +335,10 @@ mod tests {
             (5, 5, 2.0, 0.5),
             (6, 1, 1.0, 0.0),
             (4, 0, 1.0, 0.3),
+            // negative alpha needs theta >= k |alpha|
+            (6, 3, 5.0, -1.0),
+            (7, 4, 11.0, -2.0),
+            (6, 3, f64::INFINITY, f64::NEG_INFINITY),
         ] {
             let p = py_zetas(n, s, theta, alpha);
             let lq = conditional_bernoulli_log_q(n, s, &p);
@@ -322,6 +375,8 @@ mod tests {
             (7, 4, 0.2, 0.9),
             (5, 5, 2.0, 0.5),
             (6, 1, 1.0, 0.0),
+            (6, 3, 5.0, -1.0),
+            (6, 3, f64::INFINITY, f64::NEG_INFINITY),
         ] {
             let p = py_zetas(n, s, theta, alpha);
             let probs = conditional_bernoulli_probs(n, s, theta, alpha);
@@ -375,8 +430,12 @@ mod tests {
             (6, 6, 0.5),
             (8, 5, 0.0),
             (5, 0, 0.4),
+            (7, 3, -1.0),
+            (6, 2, -2.5),
+            (6, 3, f64::NEG_INFINITY),
         ] {
-            for theta in [0.3, 25.0] {
+            let theta0 = default_theta(s + 1, alpha);
+            for theta in [theta0, theta0 + 25.0] {
                 let p = py_zetas(n, s, theta, alpha);
                 let probs = conditional_bernoulli_probs(n, s, theta, alpha);
                 let total = brute_q(n, &p, 0, s, 0);
@@ -399,8 +458,8 @@ mod tests {
     // the law of the zetas given their sum should not depend on theta
     #[test]
     fn conditional_law_free_of_theta() {
-        let (n, s, alpha) = (7, 3, 0.6);
-        let law = |theta: f64| -> Vec<f64> {
+        let (n, s) = (7, 3);
+        let law = |theta: f64, alpha: f64| -> Vec<f64> {
             let p = py_zetas(n, s, theta, alpha);
             let lq = conditional_bernoulli_log_q(n, s, &p);
             let total = lq[s * n].exp();
@@ -409,11 +468,29 @@ mod tests {
                 .map(|zs| path_prob(n, &p, 0, 0, &zs) / total)
                 .collect()
         };
-        // theta only has to be above -alpha
-        let (a, b) = (law(-0.3), law(25.0));
-        assert!((a.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+        // theta only has to be above -alpha, and for alpha < 0 at least k |alpha|
+        for (alpha, theta_a, theta_b) in [(0.6, -0.3, 25.0), (-0.7, 2.8, 60.0)] {
+            let (a, b) = (law(theta_a, alpha), law(theta_b, alpha));
+            assert!((a.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+            for (x, y) in a.iter().zip(&b) {
+                assert!((x - y).abs() < 1e-12, "alpha={alpha}: {x} vs {y}");
+            }
+        }
+    }
+
+    // alpha = -inf is the limit of very negative alpha
+    #[test]
+    fn negative_infinity_is_the_limit() {
+        let (n, s) = (7, 3);
+        let law = |alpha: f64| -> Vec<f64> {
+            let probs = conditional_bernoulli_probs(n, s, default_theta(s + 1, alpha), alpha);
+            sequences(n)
+                .map(|zs| sampler_prob(n, s, &probs, &zs))
+                .collect()
+        };
+        let (a, b) = (law(f64::NEG_INFINITY), law(-1e6));
         for (x, y) in a.iter().zip(&b) {
-            assert!((x - y).abs() < 1e-12, "{x} vs {y}");
+            assert!((x - y).abs() < 1e-5, "{x} vs {y}");
         }
     }
 }

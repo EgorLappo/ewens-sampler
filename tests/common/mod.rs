@@ -59,12 +59,27 @@ fn normalize(law: impl IntoIterator<Item = (Vec<u16>, f64)>) -> Law {
 
 /// closed-form pitman-yor law of the configuration given n and k (theta cancels):
 ///   P(c | n, k) ∝ prod_b (1-alpha)_(c_b - 1) / c_b!  /  prod_j a_j!
-/// alpha = 0 is the ewens sampling formula, P(c | n, k) ∝ 1 / (prod_b c_b prod_j a_j!)
+/// alpha = 0 is the ewens sampling formula, P(c | n, k) ∝ 1 / (prod_b c_b prod_j a_j!).
+/// the limits are alpha = 1, with all the mass on (1, ..., 1, n - k + 1), and alpha = -inf, where
+/// (1-alpha)_(c-1) ~ |alpha|^(c-1) and prod_b |alpha|^(c_b - 1) = |alpha|^(n-k) cancels
 pub fn py_law(n: usize, k: usize, alpha: f64) -> Law {
+    if alpha == 1.0 {
+        let mut c = vec![1; k];
+        c[k - 1] = (n - k + 1) as u16;
+        return Law::from([(c, 1.0)]);
+    }
     normalize(partitions(n, k).into_iter().map(|c| {
         let w = c
             .iter()
-            .map(|&m| rising(1.0 - alpha, m as usize - 1) / factorial(m as usize))
+            .map(|&m| {
+                let m = m as usize;
+                let rise = if alpha == f64::NEG_INFINITY {
+                    1.0
+                } else {
+                    rising(1.0 - alpha, m - 1)
+                };
+                rise / factorial(m)
+            })
             .product::<f64>()
             / multiplicity_factorials(&c);
         (c, w)
