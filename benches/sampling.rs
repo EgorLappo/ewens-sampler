@@ -38,18 +38,20 @@ fn samplers() -> [(&'static str, Make); 5] {
         ("feller", |t, n, k| {
             Box::new(FellerSamplerK::new(t, n, k).unwrap())
         }),
-        ("crp", |t, n, k| Box::new(CRPSamplerK::new(t, n, k))),
+        ("crp", |t, n, k| {
+            Box::new(CRPSamplerK::new(t, n, k).unwrap())
+        }),
         ("conditional_crp", |t, n, k| {
             Box::new(ConditionalCRPSampler::new(t, n, k, None).unwrap())
         }),
         // alpha matters for speed, as joining a table is retried w.p. alpha at most
         ("pitman_yor", |t, n, k| {
-            Box::new(PYSamplerK::new(t, 0.5, n, k))
+            Box::new(PYSamplerK::new(t, 0.5, n, k).unwrap())
         }),
         // negative alpha mixes copying with uniform tables instead of retrying,
         // and needs its own theta
         ("pitman_yor_negative", |_, n, k| {
-            Box::new(PYSamplerK::new(default_theta(k, -1.0), -1.0, n, k))
+            Box::new(PYSamplerK::new(default_theta(k, -1.0), -1.0, n, k).unwrap())
         }),
     ]
 }
@@ -94,7 +96,7 @@ fn bench_sample(c: &mut Criterion) {
 fn bench_rejection(c: &mut Criterion) {
     let mut group = c.benchmark_group("sample/rejection");
     for (n, k) in grid() {
-        let sampler = FellerSampler::new(theta_mle(n, k, None), n);
+        let sampler = FellerSampler::new(theta_mle(n, k, None), n).unwrap();
         let mut rng = Pcg64::seed_from_u64(SEED);
         group.throughput(Throughput::Elements(n as u64));
         group.bench_function(BenchmarkId::new(format!("k={k}"), n), |b| {

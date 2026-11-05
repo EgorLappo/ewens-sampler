@@ -1,5 +1,7 @@
 use crate::Configuration;
 
+mod pitman_yor;
+
 // NOTE: for future me and everyone else :3
 //   see how we don't have a special separate function for conditional tests
 // this is because conditional test adds a constant term to all probabilities

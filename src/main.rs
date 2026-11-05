@@ -1,5 +1,5 @@
 use clap::{ArgGroup, Parser};
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{Result, bail};
 use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
 use rand::SeedableRng;
@@ -9,9 +9,10 @@ use std::io::Write;
 use ewens_sampler::Configuration;
 use ewens_sampler::samplers::Sampler;
 use ewens_sampler::samplers::ewens::{
-    BiasedCRPSampler, ConditionalCRPSampler, FellerSampler, FellerSamplerK,
+    self, BiasedCRPSampler, ConditionalCRPSampler, FellerSampler, FellerSamplerK,
     check_initial_configuration,
 };
+use ewens_sampler::samplers::pitman_yor::{self, PYSampler, PYSamplerK};
 use ewens_sampler::stats::{SlatkinTest, Test, WattersonTest};
 
 const PROGRESS_STYLE: &str =
@@ -22,102 +23,86 @@ fn main() -> Result<()> {
 
     let opts = Opts::parse();
 
-    // first, will we test or sample?
-    if let Some(ref tc) = opts.test {
-        let n = tc.n();
-        let k = tc.k();
+    // n and k come from the configuration to test, or from the options when just sampling
+    // (where clap makes sure we have n)
+    let (n, k) = match &opts.test {
+        Some(tc) => (tc.n(), Some(tc.k())),
+        None => (opts.n.unwrap(), opts.k),
+    };
 
-        // do we have an initial configuration or not
-        if let Some(ref ic) = opts.initial_configuration {
-            // validate before theta_mle sees it
-            check_initial_configuration(n, k, ic)?;
-            let n0 = ic.n();
-            let k0 = ic.k();
-            let theta = ewens_sampler::samplers::ewens::theta::theta_mle(n, k, Some((n0, k0)));
-            // do we have nontrivial bias requested?
-            if let Some(bias) = opts.bias
-                && bias != 1.0
-            {
-                // use biased CRP
-                let sampler = BiasedCRPSampler::new(theta, n, k, bias, Some(ic))?;
-                run_test(sampler, tc, Some(ic), &opts)?;
-            } else {
-                // just use CRP
-                let sampler = ConditionalCRPSampler::new(theta, n, k, Some(ic))?;
-                run_test(sampler, tc, Some(ic), &opts)?;
-            }
-        } else {
-            let theta = ewens_sampler::samplers::ewens::theta::theta_mle(n, k, None);
-            // do we have nontrivial bias requested?
-            if let Some(bias) = opts.bias
-                && bias != 1.0
-            {
-                // here ic is empty
-                let sampler = BiasedCRPSampler::new(theta, n, k, bias, None)?;
-                run_test(sampler, tc, None, &opts)?;
-            } else {
-                // if not, just sample with Feller again
-                let sampler = FellerSamplerK::new(theta, n, k)?;
-                run_test(sampler, tc, None, &opts)?;
-            }
-        }
-    } else {
-        // if we are just sampling, is it fixed k or not?
-        if let Some(k) = opts.k {
-            let n = opts.n.unwrap();
+    // the process and what it is conditioned on decide the sampler
+    let sampler = make_sampler(opts.model(), n, opts.conditioning(n, k)?)?;
 
-            // if fixed k, do we have an initial configuration or not
-            if let Some(ic) = opts.initial_configuration {
-                // validate before theta_mle sees it
-                check_initial_configuration(n, k, &ic)?;
-                let n0 = ic.n();
-                let k0 = ic.k();
-                let theta = ewens_sampler::samplers::ewens::theta::theta_mle(n, k, Some((n0, k0)));
-
-                // do we have nontrivial bias requested?
-                if let Some(bias) = opts.bias
-                    && bias != 1.0
-                {
-                    // use biased CRP
-                    let sampler = BiasedCRPSampler::new(theta, n, k, bias, Some(&ic))?;
-                    run_sampler(sampler, opts.samples, opts.seed, opts.quiet)?;
-                } else {
-                    // just use CRP
-                    let sampler = ConditionalCRPSampler::new(theta, n, k, Some(&ic))?;
-                    run_sampler(sampler, opts.samples, opts.seed, opts.quiet)?;
-                }
-            } else {
-                let theta = ewens_sampler::samplers::ewens::theta::theta_mle(n, k, None);
-                // do we have nontrivial bias requested?
-                if let Some(bias) = opts.bias
-                    && bias != 1.0
-                {
-                    // here ic is empty
-                    let sampler = BiasedCRPSampler::new(theta, n, k, bias, None)?;
-                    run_sampler(sampler, opts.samples, opts.seed, opts.quiet)?;
-                } else {
-                    // if not, just sample with Feller again
-                    let sampler = FellerSamplerK::new(theta, n, k)?;
-                    run_sampler(sampler, opts.samples, opts.seed, opts.quiet)?;
-                }
-            }
-        } else {
-            // without fixed k we just use Feller sampler,
-            // and n, theta should be enforced by clap
-            let n = opts.n.unwrap();
-            let theta = opts.theta.unwrap();
-
-            let sampler = FellerSampler::new(theta, n);
-            run_sampler(sampler, opts.samples, opts.seed, opts.quiet)?;
-        }
+    // then, will we test or sample?
+    match &opts.test {
+        Some(tc) => run_test(&*sampler, tc, &opts),
+        None => run_sampler(&*sampler, opts.samples, opts.seed, opts.quiet),
     }
+}
 
-    Ok(())
+/// the process the configurations come from
+#[derive(Debug, Clone, Copy)]
+enum Model {
+    Ewens,
+    /// the frequency-biased restaurant (experimental)
+    Biased {
+        bias: f64,
+    },
+    PitmanYor {
+        alpha: f64,
+    },
+}
+
+/// what the configurations are conditioned on, besides n
+#[derive(Debug, Clone, Copy)]
+enum Conditioning<'a> {
+    /// nothing, so theta matters and has to be given
+    Free { theta: f64 },
+    /// the number of alleles, so theta drops out and we use its mle
+    K { k: usize },
+    /// k and an initial configuration that the samples extend
+    Initial { k: usize, ic: &'a Configuration },
+}
+
+/// one sampler for every model and conditioning
+fn make_sampler(model: Model, n: usize, given: Conditioning) -> Result<Box<dyn Sampler<Pcg64>>> {
+    use Conditioning::*;
+    use Model::*;
+
+    // theta only matters without k. otherwise it is the mle, which for an
+    // initial configuration is fitted to the samples after it
+    let theta = match (model, given) {
+        (_, Free { theta }) => theta,
+        (PitmanYor { alpha }, K { k }) => pitman_yor::theta::theta_mle(n, k, alpha, None),
+        (PitmanYor { alpha }, Initial { k, ic }) => {
+            pitman_yor::theta::theta_mle(n, k, alpha, Some((ic.n(), ic.k())))
+        }
+        (_, K { k }) => ewens::theta::theta_mle(n, k, None),
+        (_, Initial { k, ic }) => ewens::theta::theta_mle(n, k, Some((ic.n(), ic.k()))),
+    };
+
+    let sampler: Box<dyn Sampler<Pcg64>> = match (model, given) {
+        (Ewens, Free { .. }) => Box::new(FellerSampler::new(theta, n)?),
+        (Ewens, K { k }) => Box::new(FellerSamplerK::new(theta, n, k)?),
+        (Ewens, Initial { k, ic }) => Box::new(ConditionalCRPSampler::new(theta, n, k, Some(ic))?),
+        // clap only takes a bias with k
+        (Biased { .. }, Free { .. }) => unreachable!("bias without k"),
+        (Biased { bias }, K { k }) => Box::new(BiasedCRPSampler::new(theta, n, k, bias, None)?),
+        (Biased { bias }, Initial { k, ic }) => {
+            Box::new(BiasedCRPSampler::new(theta, n, k, bias, Some(ic))?)
+        }
+        (PitmanYor { alpha }, Free { .. }) => Box::new(PYSampler::new(theta, alpha, n)?),
+        (PitmanYor { alpha }, K { k }) => Box::new(PYSamplerK::new(theta, alpha, n, k)?),
+        (PitmanYor { .. }, Initial { .. }) => {
+            unimplemented!("pitman-yor sampling from an initial configuration")
+        }
+    };
+    Ok(sampler)
 }
 
 #[derive(Debug, Clone, Parser)]
 #[command(version,
-    about = "a ewens distribution utility",
+    about = "a ewens and pitman-yor distribution utility",
     long_about = None,
     group(ArgGroup::new("conditional").args(["k", "test"])),
 )]
@@ -152,13 +137,24 @@ struct Opts {
         long,
         value_name = "THETA",
         help = "value of theta (doesn't affect the results when k is fixed)",
+        allow_negative_numbers = true, // pitman-yor takes theta > -alpha
         required_unless_present("conditional") // don't need theta if have conditional sampling
     )]
     theta: Option<f64>,
     #[arg(
         short,
+        long,
+        value_name = "ALPHA",
+        help = "sample from pitman-yor with this alpha <= 1 instead of ewens: conformity for alpha > 0, anticonformity for alpha < 0, down to -inf. without k, alpha < 0 needs theta = m |alpha| for a whole number m of types",
+        value_parser = parse_alpha,
+        allow_hyphen_values = true, // for negative alpha, and -inf
+        conflicts_with("bias") // pitman-yor supersedes the biased restaurant
+    )]
+    alpha: Option<f64>,
+    #[arg(
+        short,
         long = "initial-configuration",
-        help = "initial configuration to start sampling from, uses conditional CRP sampler",
+        help = "initial configuration to start sampling from, uses conditional CRP sampler (not with alpha yet)",
         requires("conditional") // cant sample starting from a fixed configuration unless with fixed k
     )]
     initial_configuration: Option<Configuration>,
@@ -184,8 +180,51 @@ struct Opts {
     quiet: bool,
 }
 
+impl Opts {
+    fn model(&self) -> Model {
+        match (self.alpha, self.bias) {
+            // clap doesn't take both
+            (Some(alpha), _) => Model::PitmanYor { alpha },
+            // bias 1 is the neutral model
+            (None, Some(bias)) if bias != 1.0 => Model::Biased { bias },
+            _ => Model::Ewens,
+        }
+    }
+
+    fn conditioning(&self, n: usize, k: Option<usize>) -> Result<Conditioning<'_>> {
+        Ok(match (k, &self.initial_configuration) {
+            // clap asks for theta without k, and only takes an initial configuration with k
+            (None, _) => Conditioning::Free {
+                theta: self.theta.unwrap(),
+            },
+            (Some(k), None) => {
+                // validate before theta_mle sees it, as the pitman-yor one panics
+                if !(1..=n).contains(&k) {
+                    bail!("invalid parameters n={n}, k={k}. requires 1 <= k <= n");
+                }
+                Conditioning::K { k }
+            }
+            (Some(k), Some(ic)) => {
+                // validate before theta_mle sees it, which also rules out a bad k
+                check_initial_configuration(n, k, ic)?;
+                Conditioning::Initial { k, ic }
+            }
+        })
+    }
+}
+
+// at alpha = 1 the only possible configuration is (n - k + 1, 1, ..., 1), and past it there is nothing
+fn parse_alpha(s: &str) -> Result<f64, String> {
+    let alpha: f64 = s.parse().map_err(|e| format!("{e}"))?;
+    if alpha <= 1. {
+        Ok(alpha)
+    } else {
+        Err("alpha has to be at most 1".to_string())
+    }
+}
+
 /// run sampler and print configurations to stdout
-fn run_sampler(sampler: impl Sampler<Pcg64>, samples: usize, seed: u64, quiet: bool) -> Result<()> {
+fn run_sampler(sampler: &dyn Sampler<Pcg64>, samples: usize, seed: u64, quiet: bool) -> Result<()> {
     let mut rng = Pcg64::seed_from_u64(seed);
     let stdout = std::io::stdout();
     let mut stdout = stdout.lock();
@@ -221,11 +260,11 @@ fn run_sampler(sampler: impl Sampler<Pcg64>, samples: usize, seed: u64, quiet: b
 
 /// run sampler and test specific configuration
 fn run_test(
-    sampler: impl Sampler<Pcg64>,
+    sampler: &dyn Sampler<Pcg64>,
     test_configuration: &Configuration,
-    ic: Option<&Configuration>,
     opts: &Opts,
 ) -> Result<()> {
+    let ic = opts.initial_configuration.as_ref();
     let samples = opts.samples;
     let seed = opts.seed;
     let mut rng = Pcg64::seed_from_u64(seed);
@@ -304,6 +343,10 @@ fn run_test(
             if let Some(b) = opts.bias {
                 val.insert("bias".to_string(), serde_json::json!(b));
             }
+
+            if let Some(a) = opts.alpha {
+                val.insert("alpha".to_string(), serde_json::json!(a));
+            }
         }
 
         let string = serde_json::to_string(&val)?;
@@ -317,6 +360,9 @@ fn run_test(
         }
         if let Some(b) = opts.bias {
             println!("bias\t{}", b)
+        }
+        if let Some(a) = opts.alpha {
+            println!("alpha\t{}", a)
         }
         println!("theta\t{}", sampler.theta());
 

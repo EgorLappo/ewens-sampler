@@ -14,18 +14,22 @@ pub struct CRPSamplerK {
 }
 
 impl CRPSamplerK {
-    pub fn new(theta: f64, n: usize, k: usize) -> Self {
+    pub fn new(theta: f64, n: usize, k: usize) -> Result<Self> {
+        if k < 1 || k > n {
+            bail!("invalid parameters n={n}, k={k}. requires 1 <= k <= n");
+        }
+
         // unconstrained probabilities for zeta
         let p = crp_bernoulli_p(n, theta);
         // conditioned ones
         let probs = conditional_bernoulli_probs(k - 1, &p);
-        Self {
+        Ok(Self {
             theta,
             n,
             k,
             n_vars: p.len(),
             probs,
-        }
+        })
     }
 }
 

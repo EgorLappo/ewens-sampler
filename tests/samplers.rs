@@ -101,7 +101,7 @@ fn minus_one_is_uniform_over_unordered_configurations() {
 fn goodness_of_fit_rejects_wrong_law() {
     assert_fits(
         "crp vs py",
-        &CRPSamplerK::new(1.0, 10, 4),
+        &CRPSamplerK::new(1.0, 10, 4).unwrap(),
         &py_law(10, 4, 0.5),
         1,
     );
@@ -129,7 +129,9 @@ fn feller_k_fits_esf() {
 
 #[test]
 fn crp_k_fits_esf() {
-    fits_esf_for_any_theta("crp", |t, n, k| Box::new(CRPSamplerK::new(t, n, k)));
+    fits_esf_for_any_theta("crp", |t, n, k| {
+        Box::new(CRPSamplerK::new(t, n, k).unwrap())
+    });
 }
 
 #[test]
@@ -151,7 +153,12 @@ fn biased_crp_without_bias_fits_esf() {
 fn feller_fits_unconditional_esf() {
     for theta in [0.5, 3.0] {
         let label = format!("feller theta={theta}");
-        assert_fits(&label, &FellerSampler::new(theta, 7), &esf_law(7, theta), 1);
+        assert_fits(
+            &label,
+            &FellerSampler::new(theta, 7).unwrap(),
+            &esf_law(7, theta),
+            1,
+        );
     }
 }
 
@@ -203,7 +210,7 @@ fn pitman_yor_fits_unconditional_law() {
     for (theta, alpha) in PY_FREE {
         let label = format!("pitman-yor alpha={alpha} theta={theta}");
         let law = py_free_law(n, theta, alpha);
-        assert_fits(&label, &PYSampler::new(theta, alpha, n), &law, 1);
+        assert_fits(&label, &PYSampler::new(theta, alpha, n).unwrap(), &law, 1);
     }
 }
 
@@ -218,7 +225,7 @@ fn fits_py_law_for_any_theta(alphas: &[f64]) {
                 .into_iter()
                 .chain((alpha > 0.4).then_some(-0.4))
             {
-                let sampler = PYSamplerK::new(theta, alpha, n, k);
+                let sampler = PYSamplerK::new(theta, alpha, n, k).unwrap();
                 let label = format!("pitman-yor alpha={alpha} n={n} k={k} theta={theta}");
                 assert_fits(&label, &sampler, &law, 1);
             }
@@ -233,7 +240,7 @@ fn pitman_yor_k_fits_exact_law_at_the_mle() {
     for alpha in [0.5, 0.9, -1.0, -10.0] {
         for (n, k) in [(10, 4), (9, 2)] {
             let theta = theta_mle_py(n, k, alpha, None);
-            let sampler = PYSamplerK::new(theta, alpha, n, k);
+            let sampler = PYSamplerK::new(theta, alpha, n, k).unwrap();
             let label = format!("pitman-yor alpha={alpha} n={n} k={k} mle theta={theta}");
             assert_fits(&label, &sampler, &py_law(n, k, alpha), 1);
         }
@@ -291,7 +298,7 @@ fn samplers_agree_at_large_n() {
     let reference = summary(&FellerSamplerK::new(theta, n, k).unwrap(), samples, 1);
 
     let others: [(&str, Box<dyn Sampler<Pcg64>>); 6] = [
-        ("crp", Box::new(CRPSamplerK::new(theta, n, k))),
+        ("crp", Box::new(CRPSamplerK::new(theta, n, k).unwrap())),
         (
             "conditional crp",
             Box::new(ConditionalCRPSampler::new(theta, n, k, None).unwrap()),
@@ -304,10 +311,13 @@ fn samplers_agree_at_large_n() {
             "feller, theta 0.01",
             Box::new(FellerSamplerK::new(0.01, n, k).unwrap()),
         ),
-        ("crp, theta 1000", Box::new(CRPSamplerK::new(1000.0, n, k))),
+        (
+            "crp, theta 1000",
+            Box::new(CRPSamplerK::new(1000.0, n, k).unwrap()),
+        ),
         (
             "pitman-yor, alpha 0",
-            Box::new(PYSamplerK::new(theta, 0.0, n, k)),
+            Box::new(PYSamplerK::new(theta, 0.0, n, k).unwrap()),
         ),
     ];
     for (seed, (name, sampler)) in (2..).zip(others) {
@@ -323,9 +333,13 @@ fn pitman_yor_free_of_theta_at_large_n() {
     let (n, k, samples) = (265, 81, 20_000);
     // a reference theta and two others for each alpha, the smallest valid ones first
     for (alpha, thetas) in [(0.5, [1.0, -0.4, 50.0]), (-1.0, [82.0, 200.0, 1000.0])] {
-        let reference = summary(&PYSamplerK::new(thetas[0], alpha, n, k), samples, 1);
+        let reference = summary(
+            &PYSamplerK::new(thetas[0], alpha, n, k).unwrap(),
+            samples,
+            1,
+        );
         for (seed, &theta) in (2..).zip(&thetas[1..]) {
-            let other = summary(&PYSamplerK::new(theta, alpha, n, k), samples, seed);
+            let other = summary(&PYSamplerK::new(theta, alpha, n, k).unwrap(), samples, seed);
             let name = format!("pitman-yor alpha={alpha}, theta {theta} vs {}", thetas[0]);
             assert_same_summary(&name, reference, other, samples);
         }
@@ -376,7 +390,7 @@ fn pitman_yor_given_k_agrees_at_large_n() {
     let (n, samples) = (120, 5_000);
     for (theta, alpha) in [(1.0, 0.5), (30.0, -1.0)] {
         let label = format!("pitman-yor alpha={alpha} theta={theta}");
-        let sampler = PYSampler::new(theta, alpha, n);
+        let sampler = PYSampler::new(theta, alpha, n).unwrap();
 
         let (mean, var) = k_moments(n, theta, alpha);
         let mut rng = Pcg64::seed_from_u64(1);
@@ -392,7 +406,7 @@ fn pitman_yor_given_k_agrees_at_large_n() {
 
         // the expected k is about the most likely one, so rejection doesn't take too long
         let k = mean.round() as usize;
-        let reference = summary(&PYSamplerK::new(theta, alpha, n, k), samples, 2);
+        let reference = summary(&PYSamplerK::new(theta, alpha, n, k).unwrap(), samples, 2);
         let other = summary(&GivenK(sampler, k), samples, 3);
         assert_same_summary(&format!("{label} given k={k}"), reference, other, samples);
     }
@@ -424,19 +438,22 @@ fn samples_have_k_alleles_summing_to_n() {
                     ),
                     (
                         "pitman-yor 0.5",
-                        Box::new(PYSamplerK::new(theta, 0.5, n, k)),
+                        Box::new(PYSamplerK::new(theta, 0.5, n, k).unwrap()),
                     ),
                     // these ignore the theta of the loop, which isn't valid for them
                     (
                         "pitman-yor -1",
-                        Box::new(PYSamplerK::new(default_theta(k, -1.0), -1.0, n, k)),
+                        Box::new(PYSamplerK::new(default_theta(k, -1.0), -1.0, n, k).unwrap()),
                     ),
                     (
                         "pitman-yor -inf",
-                        Box::new(PYSamplerK::new(f64::INFINITY, f64::NEG_INFINITY, n, k)),
+                        Box::new(PYSamplerK::new(f64::INFINITY, f64::NEG_INFINITY, n, k).unwrap()),
                     ),
-                    ("pitman-yor 1", Box::new(PYSamplerK::new(1.0, 1.0, n, k))),
-                    ("crp", Box::new(CRPSamplerK::new(theta, n, k))),
+                    (
+                        "pitman-yor 1",
+                        Box::new(PYSamplerK::new(1.0, 1.0, n, k).unwrap()),
+                    ),
+                    ("crp", Box::new(CRPSamplerK::new(theta, n, k).unwrap())),
                     (
                         "conditional crp",
                         Box::new(ConditionalCRPSampler::new(theta, n, k, None).unwrap()),
@@ -468,19 +485,27 @@ fn unconditional_samples_sum_to_n() {
         for theta in [0.05, 1.0, 30.0] {
             // with the most alleles each can give
             let samplers: [(&str, Box<dyn Sampler<Pcg64>>, usize); 5] = [
-                ("feller", Box::new(FellerSampler::new(theta, n)), n),
-                ("pitman-yor 0.5", Box::new(PYSampler::new(theta, 0.5, n)), n),
-                ("pitman-yor 1", Box::new(PYSampler::new(theta, 1.0, n)), n),
+                ("feller", Box::new(FellerSampler::new(theta, n).unwrap()), n),
+                (
+                    "pitman-yor 0.5",
+                    Box::new(PYSampler::new(theta, 0.5, n).unwrap()),
+                    n,
+                ),
+                (
+                    "pitman-yor 1",
+                    Box::new(PYSampler::new(theta, 1.0, n).unwrap()),
+                    n,
+                ),
                 // these ignore the theta of the loop, as for alpha < 0 it has to be m |alpha|
                 // for m types, and then there are at most m alleles
                 (
                     "pitman-yor -0.5, 3 types",
-                    Box::new(PYSampler::new(1.5, -0.5, n)),
+                    Box::new(PYSampler::new(1.5, -0.5, n).unwrap()),
                     3,
                 ),
                 (
                     "pitman-yor -2, 50 types",
-                    Box::new(PYSampler::new(100.0, -2.0, n)),
+                    Box::new(PYSampler::new(100.0, -2.0, n).unwrap()),
                     50,
                 ),
             ];
@@ -537,15 +562,49 @@ fn constructors_reject_invalid_parameters() {
     assert!(FellerSamplerK::new(1.0, 5, 6).is_err());
     assert!(ConditionalCRPSampler::new(1.0, 5, 0, None).is_err());
     assert!(ConditionalCRPSampler::new(1.0, 5, 6, None).is_err());
+    assert!(CRPSamplerK::new(1.0, 5, 0).is_err());
+    assert!(CRPSamplerK::new(1.0, 5, 6).is_err());
     for bias in [0.0, -1.0, f64::NAN, f64::INFINITY] {
         assert!(
             BiasedCRPSampler::new(1.0, 5, 2, bias, None).is_err(),
             "bias {bias}"
         );
     }
+    // theta = 0 is fine without k, as everything is one allele
+    for (theta, n) in [(-1.0, 5), (f64::INFINITY, 5), (f64::NAN, 5), (1.0, 0)] {
+        assert!(FellerSampler::new(theta, n).is_err(), "theta={theta} n={n}");
+    }
+    assert!(FellerSampler::new(0.0, 5).is_ok());
 }
 
-// PYSampler::new panics instead, like PYSamplerK
+#[test]
+fn pitman_yor_k_rejects_invalid_parameters() {
+    for (theta, alpha, n, k) in [
+        (1.0, 0.5, 5, 0),
+        (1.0, 0.5, 5, 6),
+        (1.0, 1.5, 5, 2),
+        (1.0, f64::NAN, 5, 2),
+        // theta has to be > -alpha, and >= k |alpha| for alpha < 0
+        (-0.5, 0.5, 5, 2),
+        (2.5, -1.0, 5, 3),
+        (f64::NAN, 0.5, 5, 2),
+        (f64::INFINITY, 0.5, 5, 2),
+    ] {
+        assert!(
+            PYSamplerK::new(theta, alpha, n, k).is_err(),
+            "theta={theta} alpha={alpha} n={n} k={k}"
+        );
+    }
+    // but with one allele, or at the limits of alpha, theta doesn't enter at all,
+    // like the theta = -alpha that theta_mle gives for k = 1
+    for (theta, alpha, k) in [(-0.5, 0.5, 1), (-1.0, 1.0, 3), (1.0, f64::NEG_INFINITY, 3)] {
+        assert!(
+            PYSamplerK::new(theta, alpha, 5, k).is_ok(),
+            "theta={theta} alpha={alpha} k={k}"
+        );
+    }
+}
+
 #[test]
 fn pitman_yor_rejects_invalid_parameters() {
     for (theta, alpha, n) in [
@@ -562,9 +621,8 @@ fn pitman_yor_rejects_invalid_parameters() {
         (1.0, f64::NAN, 10),
         (1.0, 0.5, 0),
     ] {
-        let made = std::panic::catch_unwind(|| PYSampler::new(theta, alpha, n));
         assert!(
-            made.is_err(),
+            PYSampler::new(theta, alpha, n).is_err(),
             "theta={theta} alpha={alpha} n={n} was accepted"
         );
     }

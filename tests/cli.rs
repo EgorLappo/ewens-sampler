@@ -3,6 +3,8 @@
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
+use ewens_sampler::samplers::pitman_yor::theta::theta_mle;
+
 const BIN: &str = env!("CARGO_BIN_EXE_ewens-sampler");
 const TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -78,6 +80,11 @@ fn samples_with_fixed_k() {
         &["-i", "1 3"],
         &["-b", "1.5"],
         &["-i", "1 3", "-b", "0.5"],
+        // pitman-yor, over the whole range of alpha
+        &["-a", "0.5"],
+        &["-a", "-1"],
+        &["-a", "-inf"],
+        &["-a", "1"],
     ] {
         let args = [&["-n", "12", "-k", "4", "-s", "100", "-q"][..], extra].concat();
         let confs = configurations(&args);
@@ -94,13 +101,23 @@ fn samples_with_fixed_k() {
 
 #[test]
 fn samples_without_fixed_k() {
-    let confs = configurations(&["-n", "12", "-t", "2.5", "-s", "100", "-q"]);
-    assert_eq!(confs.len(), 100);
-    for c in confs {
-        assert!(
-            c.iter().sum::<u16>() == 12 && c.is_sorted() && c[0] >= 1,
-            "{c:?}"
-        );
+    // with the most alleles each can give: pitman-yor takes a negative theta for alpha > 0,
+    // and for alpha < 0 theta = 3 |alpha| is 3 types
+    for (extra, max_k) in [
+        (&["-t", "2.5"][..], 12),
+        (&["-t", "2.5", "-a", "0.5"], 12),
+        (&["-t", "-0.3", "-a", "0.5"], 12),
+        (&["-t", "3", "-a", "-1"], 3),
+    ] {
+        let args = [&["-n", "12", "-s", "100", "-q"][..], extra].concat();
+        let confs = configurations(&args);
+        assert_eq!(confs.len(), 100);
+        for c in confs {
+            assert!(
+                c.iter().sum::<u16>() == 12 && c.is_sorted() && c[0] >= 1 && c.len() <= max_k,
+                "{args:?}: {c:?}"
+            );
+        }
     }
 }
 
@@ -141,6 +158,18 @@ fn test_reports_initial_configuration_and_bias() {
     assert_eq!(v["bias"], 1.3);
 }
 
+// with alpha the test runs under pitman-yor, and reports its theta mle
+#[test]
+fn test_reports_alpha() {
+    for alpha in [0.5, -1.0] {
+        let a = alpha.to_string();
+        let v = json(&["--test", "8 1 2 1", "-a", &a, "-s", "200", "-q", "--json"]);
+        assert_eq!(v["alpha"], alpha);
+        assert_eq!(v["theta"], theta_mle(12, 4, alpha, None));
+        assert!(v.get("bias").is_none());
+    }
+}
+
 #[test]
 fn test_reports_human_readable() {
     let out = run(&["--test", "1 1 2 8", "-s", "100", "-q"]);
@@ -160,6 +189,29 @@ fn test_reports_human_readable() {
 #[test]
 fn rejects_k_larger_than_n() {
     assert!(error(&["-n", "5", "-k", "6", "-q"]).contains("invalid parameters"));
+    // also for pitman-yor, whose sampler would panic
+    assert!(error(&["-n", "5", "-k", "6", "-a", "0.5", "-q"]).contains("invalid parameters"));
+}
+
+#[test]
+fn rejects_alpha_above_one() {
+    assert!(error(&["-n", "12", "-k", "4", "-a", "1.5", "-q"]).contains("at most 1"));
+}
+
+#[test]
+fn rejects_alpha_with_bias() {
+    error(&["-n", "12", "-k", "4", "-a", "0.5", "-b", "1.3", "-q"]);
+}
+
+#[test]
+fn rejects_negative_theta_without_alpha() {
+    assert!(error(&["-n", "12", "-t", "-1", "-q"]).contains("0 <= theta"));
+}
+
+// for alpha < 0 the free sampler needs a whole number of types, and says so instead of panicking
+#[test]
+fn rejects_theta_that_is_not_a_whole_number_of_types() {
+    assert!(error(&["-n", "12", "-t", "2.5", "-a", "-1", "-q"]).contains("whole number"));
 }
 
 #[test]

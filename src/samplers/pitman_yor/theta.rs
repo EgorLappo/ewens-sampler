@@ -259,7 +259,7 @@ mod tests {
             (100, 5, -10.),
         ] {
             let theta = assert_peaks(n, k, alpha, None);
-            crate::samplers::pitman_yor::PYSampler::new(theta, alpha, n);
+            crate::samplers::pitman_yor::PYSampler::new(theta, alpha, n).unwrap();
         }
         // the peak is at 115.7 types
         let theta = theta_mle(265, 81, -1., None);

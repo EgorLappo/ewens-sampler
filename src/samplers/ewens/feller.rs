@@ -11,9 +11,15 @@ pub struct FellerSampler {
 }
 
 impl FellerSampler {
-    pub fn new(theta: f64, n: usize) -> Self {
+    pub fn new(theta: f64, n: usize) -> Result<Self> {
+        // theta = 0 puts every sample in one allele, but theta = inf (all singletons)
+        // would make the probabilities below inf / inf
+        if n < 1 || !(theta >= 0. && theta.is_finite()) {
+            bail!("invalid parameters theta={theta}, n={n}. requires 0 <= theta < inf and n >= 1");
+        }
+
         let p = feller_bernoulli_p(n, theta);
-        Self { theta, n, p }
+        Ok(Self { theta, n, p })
     }
 }
 

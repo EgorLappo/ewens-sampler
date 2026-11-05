@@ -1,4 +1,5 @@
 use super::{Sampler, conditional_bernoulli_sample, ln_add_exp};
+use color_eyre::eyre::{Result, bail};
 use rand::{Rng, RngExt};
 
 pub mod theta;
@@ -270,33 +271,32 @@ pub struct PYSampler {
 }
 
 impl PYSampler {
-    pub fn new(theta: f64, alpha: f64, n: usize) -> Self {
-        assert!(
-            n >= 1 && alpha > f64::NEG_INFINITY && alpha <= 1.0,
-            "PYSampler: need n >= 1 and -inf < alpha <= 1, got n={n}, alpha={alpha}"
-        );
+    pub fn new(theta: f64, alpha: f64, n: usize) -> Result<Self> {
+        if !(n >= 1 && alpha > f64::NEG_INFINITY && alpha <= 1.0) {
+            bail!("invalid parameters n={n}, alpha={alpha}. requires n >= 1 and -inf < alpha <= 1");
+        }
         let max_k = if alpha < 0.0 {
             // the finite dirichlet case with m types, where zeta is 0 once all m are seen.
             // any other theta would give negative probabilities
             let m = theta / -alpha;
-            assert!(
-                m.is_finite() && m.round() >= 1.0 && (m - m.round()).abs() <= 1e-9 * m,
-                "PYSampler: for alpha < 0, theta / |alpha| has to be a whole number of types, got theta={theta}, alpha={alpha}"
-            );
+            if !(m.is_finite() && m.round() >= 1.0 && (m - m.round()).abs() <= 1e-9 * m) {
+                bail!(
+                    "invalid parameters theta={theta}, alpha={alpha}. requires theta = m |alpha| for a whole number m >= 1 of types"
+                );
+            }
             m.round() as usize
         } else {
-            assert!(
-                theta.is_finite() && theta + alpha > 0.0,
-                "PYSampler: need theta > -alpha, got theta={theta}, alpha={alpha}"
-            );
+            if !(theta.is_finite() && theta + alpha > 0.0) {
+                bail!("invalid parameters theta={theta}, alpha={alpha}. requires theta > -alpha");
+            }
             n
         };
-        Self {
+        Ok(Self {
             theta,
             alpha,
             n,
             max_k,
-        }
+        })
     }
 }
 
@@ -334,7 +334,26 @@ pub struct PYSamplerK {
 }
 
 impl PYSamplerK {
-    pub fn new(theta: f64, alpha: f64, n: usize, k: usize) -> Self {
+    pub fn new(theta: f64, alpha: f64, n: usize, k: usize) -> Result<Self> {
+        if k < 1 || k > n {
+            bail!("invalid parameters n={n}, k={k}. requires 1 <= k <= n");
+        }
+        if alpha.is_nan() || alpha > 1.0 {
+            bail!("invalid parameters alpha={alpha}. requires alpha <= 1");
+        }
+        // theta only enters through the zetas, so it can be anything with one allele,
+        // or at alpha = 1 or -inf (like the theta = -alpha that theta_mle gives for k = 1).
+        // otherwise this is what py_zetas needs
+        if k > 1
+            && alpha > f64::NEG_INFINITY
+            && alpha < 1.0
+            && !(theta.is_finite() && theta + alpha > 0.0 && theta + k as f64 * alpha >= 0.0)
+        {
+            bail!(
+                "invalid parameters theta={theta}, alpha={alpha}, k={k}. requires theta > -alpha and theta >= k |alpha|"
+            );
+        }
+
         // zetas for customers 2..=n, like crp_bernoulli_p in ewens
         // (first one is forced to be 1)
         let n_vars = n - 1;
@@ -345,14 +364,14 @@ impl PYSamplerK {
         } else {
             conditional_bernoulli_probs(n_vars, k - 1, theta, alpha)
         };
-        Self {
+        Ok(Self {
             theta,
             alpha,
             n,
             k,
             n_vars,
             probs,
-        }
+        })
     }
 }
 
