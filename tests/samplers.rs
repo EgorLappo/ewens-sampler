@@ -14,7 +14,7 @@ use ewens_sampler::samplers::ewens::{
 };
 use ewens_sampler::samplers::pitman_yor::theta::theta_mle as theta_mle_py;
 use ewens_sampler::samplers::pitman_yor::{PYSampler, PYSamplerK, default_theta};
-use ewens_sampler::stats::watterson_statistic;
+use ewens_sampler::stats::ewens::watterson_statistic;
 use rand::SeedableRng;
 use rand_pcg::Pcg64;
 

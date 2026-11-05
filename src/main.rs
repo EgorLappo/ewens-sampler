@@ -13,7 +13,8 @@ use ewens_sampler::samplers::ewens::{
     check_initial_configuration,
 };
 use ewens_sampler::samplers::pitman_yor::{self, PYSampler, PYSamplerK};
-use ewens_sampler::stats::{SlatkinTest, Test, WattersonTest};
+use ewens_sampler::stats::Test;
+use ewens_sampler::stats::ewens::{SlatkinTest, WattersonTest};
 
 const PROGRESS_STYLE: &str =
     "{spinner:.purple} [{elapsed}/{duration}] [{bar:.cyan/blue}] {human_pos}/{human_len}";

@@ -4,8 +4,9 @@ mod common;
 
 use common::{factorial, multiplicity_factorials, py_law};
 use ewens_sampler::Configuration;
-use ewens_sampler::stats::{
-    SlatkinTest, Test, WattersonTest, slatkin_statistic, watterson_statistic,
+use ewens_sampler::stats::Test;
+use ewens_sampler::stats::ewens::{
+    SlatkinTest, WattersonTest, slatkin_statistic, watterson_statistic,
 };
 
 fn conf(counts: &[u16]) -> Configuration {

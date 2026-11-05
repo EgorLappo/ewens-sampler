@@ -14,7 +14,8 @@ use ewens_sampler::samplers::ewens::{
     CRPSamplerK, ConditionalCRPSampler, FellerSampler, FellerSamplerK,
 };
 use ewens_sampler::samplers::pitman_yor::{PYSamplerK, default_theta};
-use ewens_sampler::stats::{SlatkinTest, Test, WattersonTest};
+use ewens_sampler::stats::Test;
+use ewens_sampler::stats::ewens::{SlatkinTest, WattersonTest};
 
 const SEED: u64 = 231;
 
