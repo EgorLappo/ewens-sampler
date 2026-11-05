@@ -133,7 +133,7 @@ fn bench_replicate(c: &mut Criterion) {
             b.iter(|| {
                 let mut samp = sampler.sample(&mut rng);
                 samp.sort_unstable();
-                (s.test(&samp), w.test(&samp))
+                (s.compare(&samp), w.compare(&samp))
             })
         });
     }

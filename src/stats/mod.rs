@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 pub mod ewens;
 pub mod pitman_yor;
 
@@ -13,5 +15,6 @@ pub trait Test {
     type Value;
     fn name(&self) -> &'static str;
     fn statistic(uconf: &[u16]) -> Self::Value;
-    fn test(&self, tconf: &[u16]) -> bool;
+    // output ordering to deal with ties and tails tallies in main.rs
+    fn compare(&self, tconf: &[u16]) -> Ordering;
 }

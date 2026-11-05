@@ -15,6 +15,9 @@ serde_json = "1.0.151"
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
+# the cli tests compare floats read back from the json exactly,
+# which needs correctly rounded parsing
+serde_json = { version = "1.0.151", features = ["float_roundtrip"] }
 
 [[bench]]
 name = "sampling"

@@ -284,20 +284,24 @@ fn run_test(
     let s = SlatkinTest::new(test_configuration);
     let w = WattersonTest::new(test_configuration);
 
-    let mut s_total: usize = 0;
-    let mut w_total: usize = 0;
+    // replicates in the lower and upper tails of each test,
+    // where ties with the observed configuration count in both
+    let mut s_lower: usize = 0;
+    let mut s_upper: usize = 0;
+    let mut w_lower: usize = 0;
+    let mut w_upper: usize = 0;
 
     for _ in 0..samples {
         let mut samp = sampler.sample(&mut rng);
         // only sort when outputting in ASCII
         samp.sort_unstable();
 
-        if s.test(&samp) {
-            s_total += 1;
-        }
-        if w.test(&samp) {
-            w_total += 1;
-        }
+        let o = s.compare(&samp);
+        s_lower += o.is_le() as usize;
+        s_upper += o.is_ge() as usize;
+        let o = w.compare(&samp);
+        w_lower += o.is_le() as usize;
+        w_upper += o.is_ge() as usize;
 
         if let Some(ref pb) = pb {
             pb.inc(1);
@@ -308,8 +312,14 @@ fn run_test(
         pb.finish_with_message("done testing");
     }
 
-    let s_ptail = (s_total + 1) as f64 / (samples + 1) as f64;
-    let w_ptail = (w_total + 1) as f64 / (samples + 1) as f64;
+    // the observed configuration is in both of its own tails.
+    // in both tests the lower tail is the even side, so a small p_lower means more even
+    // than expected (anticonformity) and a small p_upper less even (conformity).
+    // reading the upper side off p_lower as 1 - p_lower would leave out the ties
+    let s_plower = (s_lower + 1) as f64 / (samples + 1) as f64;
+    let s_pupper = (s_upper + 1) as f64 / (samples + 1) as f64;
+    let w_plower = (w_lower + 1) as f64 / (samples + 1) as f64;
+    let w_pupper = (w_upper + 1) as f64 / (samples + 1) as f64;
 
     if opts.json {
         let mut val = serde_json::json!({
@@ -320,15 +330,19 @@ fn run_test(
             "tests": [
                {
                    "test": s.name(),
-                   "tail_count": s_total,
+                   "lower_count": s_lower,
+                   "upper_count": s_upper,
                    "total_count": samples,
-                   "p_tail": s_ptail,
+                   "p_lower": s_plower,
+                   "p_upper": s_pupper,
                },
                {
                    "test": w.name(),
-                   "tail_count": w_total,
+                   "lower_count": w_lower,
+                   "upper_count": w_upper,
                    "total_count": samples,
-                   "p_tail": w_ptail,
+                   "p_lower": w_plower,
+                   "p_upper": w_pupper,
                }
             ]
         });
@@ -367,13 +381,17 @@ fn run_test(
         }
         println!("theta\t{}", sampler.theta());
 
-        println!("{}\ttail_count \t{}", s.name(), s_total);
+        println!("{}\tlower_count\t{}", s.name(), s_lower);
+        println!("{}\tupper_count\t{}", s.name(), s_upper);
         println!("{}\ttotal_count\t{}", s.name(), samples);
-        println!("{}\tp_tail\t{}", s.name(), s_ptail);
+        println!("{}\tp_lower\t{}", s.name(), s_plower);
+        println!("{}\tp_upper\t{}", s.name(), s_pupper);
 
-        println!("{}\ttail_count \t{}", w.name(), w_total);
+        println!("{}\tlower_count\t{}", w.name(), w_lower);
+        println!("{}\tupper_count\t{}", w.name(), w_upper);
         println!("{}\ttotal_count\t{}", w.name(), samples);
-        println!("{}\tp_tail\t{}", w.name(), w_ptail);
+        println!("{}\tp_lower\t{}", w.name(), w_plower);
+        println!("{}\tp_upper\t{}", w.name(), w_pupper);
     }
     Ok(())
 }

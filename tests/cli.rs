@@ -142,10 +142,39 @@ fn test_reports_json() {
     let names: Vec<_> = tests.iter().map(|t| t["test"].as_str().unwrap()).collect();
     assert_eq!(names, ["slatkin", "watterson"]);
     for t in tests {
-        let tail = t["tail_count"].as_u64().unwrap();
-        assert!(tail <= 500);
+        let lower = t["lower_count"].as_u64().unwrap();
+        let upper = t["upper_count"].as_u64().unwrap();
+        // every replicate is in one of the tails, and ties are in both
+        assert!(lower <= 500 && upper <= 500 && lower + upper >= 500, "{t}");
         assert_eq!(t["total_count"], 500);
-        assert_eq!(t["p_tail"].as_f64().unwrap(), (tail + 1) as f64 / 501.0);
+        assert_eq!(t["p_lower"].as_f64().unwrap(), (lower + 1) as f64 / 501.0);
+        assert_eq!(t["p_upper"].as_f64().unwrap(), (upper + 1) as f64 / 501.0);
+    }
+}
+
+// with k = n the only configuration is all singletons, so every replicate ties with it
+// and is in both tails
+#[test]
+fn test_counts_ties_in_both_tails() {
+    let v = json(&["--test", "1 1 1 1", "-s", "100", "-q", "--json"]);
+    for t in v["tests"].as_array().unwrap() {
+        assert_eq!(t["lower_count"], 100, "{t}");
+        assert_eq!(t["upper_count"], 100, "{t}");
+        assert_eq!(t["p_lower"], 1.0, "{t}");
+        assert_eq!(t["p_upper"], 1.0, "{t}");
+    }
+}
+
+// (1, 9) is the most probable configuration for n = 10 and k = 2 under ewens, so its lower tail
+// has every replicate, and its upper tail is just its own probability, 0.39.
+// reading the upper side off the lower tail as 1 - p_lower would reject it at any level
+#[test]
+fn test_upper_tail_of_the_most_probable_configuration() {
+    let v = json(&["--test", "1 9", "-s", "2000", "-q", "--json"]);
+    for t in v["tests"].as_array().unwrap() {
+        assert_eq!(t["p_lower"], 1.0, "{t}");
+        let p = t["p_upper"].as_f64().unwrap();
+        assert!((0.35..0.44).contains(&p), "{t}");
     }
 }
 
@@ -177,8 +206,10 @@ fn test_reports_human_readable() {
     let s = String::from_utf8(out.stdout).unwrap();
     for line in [
         "configuration\t'1 1 2 8'",
-        "slatkin\tp_tail\t",
-        "watterson\tp_tail\t",
+        "slatkin\tp_lower\t",
+        "slatkin\tp_upper\t",
+        "watterson\tp_lower\t",
+        "watterson\tp_upper\t",
     ] {
         assert!(s.contains(line), "missing {line:?} in\n{s}");
     }
