@@ -93,18 +93,16 @@ impl ExactPTest {
         let target = table_sum(&table, &uconf.0);
         Ok(Self { table, target })
     }
+
+    #[inline]
+    pub fn statistic(&self, uconf: &[u16]) -> f64 {
+        table_sum(&self.table, uconf)
+    }
 }
 
 impl Test for ExactPTest {
-    type Value = f64;
-
     fn name(&self) -> &'static str {
         "exact"
-    }
-
-    #[inline]
-    fn statistic(&self, uconf: &[u16]) -> Self::Value {
-        table_sum(&self.table, uconf)
     }
 
     fn compare(&self, tconf: &[u16]) -> Ordering {
@@ -126,18 +124,16 @@ impl ScoreTest {
         let target = table_sum(&table, &uconf.0);
         Ok(Self { table, target })
     }
+
+    #[inline]
+    pub fn statistic(&self, uconf: &[u16]) -> f64 {
+        table_sum(&self.table, uconf)
+    }
 }
 
 impl Test for ScoreTest {
-    type Value = f64;
-
     fn name(&self) -> &'static str {
         "score"
-    }
-
-    #[inline]
-    fn statistic(&self, uconf: &[u16]) -> Self::Value {
-        table_sum(&self.table, uconf)
     }
 
     fn compare(&self, tconf: &[u16]) -> Ordering {

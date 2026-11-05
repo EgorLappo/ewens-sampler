@@ -13,15 +13,8 @@ impl SlatkinTest {
 }
 
 impl Test for SlatkinTest {
-    type Value = f64;
-
     fn name(&self) -> &'static str {
         "slatkin"
-    }
-
-    #[inline]
-    fn statistic(&self, uconf: &[u16]) -> Self::Value {
-        slatkin_statistic(uconf)
     }
 
     fn compare(&self, tconf: &[u16]) -> Ordering {
@@ -64,15 +57,8 @@ impl WattersonTest {
 }
 
 impl Test for WattersonTest {
-    type Value = usize;
-
     fn name(&self) -> &'static str {
         "watterson"
-    }
-
-    #[inline]
-    fn statistic(&self, uconf: &[u16]) -> Self::Value {
-        watterson_statistic(uconf)
     }
 
     fn compare(&self, tconf: &[u16]) -> Ordering {

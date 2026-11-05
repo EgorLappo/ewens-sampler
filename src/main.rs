@@ -15,6 +15,7 @@ use ewens_sampler::samplers::ewens::{
 use ewens_sampler::samplers::pitman_yor::{self, PYSampler, PYSamplerK};
 use ewens_sampler::stats::Test;
 use ewens_sampler::stats::ewens::{SlatkinTest, WattersonTest};
+use ewens_sampler::stats::pitman_yor::{ExactPTest, ScoreTest};
 
 const PROGRESS_STYLE: &str =
     "{spinner:.purple} [{elapsed}/{duration}] [{bar:.cyan/blue}] {human_pos}/{human_len}";
@@ -36,7 +37,7 @@ fn main() -> Result<()> {
 
     // then, will we test or sample?
     match &opts.test {
-        Some(tc) => run_test(&*sampler, tc, &opts),
+        Some(tc) => run_test(&*sampler, &make_tests(opts.model(), tc)?, tc, &opts),
         None => run_sampler(&*sampler, opts.samples, opts.seed, opts.quiet),
     }
 }
@@ -101,6 +102,22 @@ fn make_sampler(model: Model, n: usize, given: Conditioning) -> Result<Box<dyn S
     Ok(sampler)
 }
 
+/// the tests for every model: pitman-yor gets its exact and score tests at the same alpha,
+/// and the others slatkin's and watterson's
+fn make_tests(model: Model, tc: &Configuration) -> Result<Vec<Box<dyn Test>>> {
+    let tests: Vec<Box<dyn Test>> = match model {
+        Model::PitmanYor { alpha } => vec![
+            Box::new(ExactPTest::new(tc, alpha)?),
+            Box::new(ScoreTest::new(tc, alpha)?),
+        ],
+        Model::Ewens | Model::Biased { .. } => vec![
+            Box::new(SlatkinTest::new(tc)),
+            Box::new(WattersonTest::new(tc)),
+        ],
+    };
+    Ok(tests)
+}
+
 #[derive(Debug, Clone, Parser)]
 #[command(version,
     about = "a ewens and pitman-yor distribution utility",
@@ -146,7 +163,7 @@ struct Opts {
         short,
         long,
         value_name = "ALPHA",
-        help = "sample from pitman-yor with this alpha <= 1 instead of ewens: conformity for alpha > 0, anticonformity for alpha < 0, down to -inf. without k, alpha < 0 needs theta = m |alpha| for a whole number m of types",
+        help = "if provided, sample from the Pitman-Yor distribution. alpha has to lie in [-inf, 1]",
         value_parser = parse_alpha,
         allow_hyphen_values = true, // for negative alpha, and -inf
         conflicts_with("bias") // pitman-yor supersedes the biased restaurant
@@ -155,7 +172,7 @@ struct Opts {
     #[arg(
         short,
         long = "initial-configuration",
-        help = "initial configuration to start sampling from, uses conditional CRP sampler (not with alpha yet)",
+        help = "initial configuration to start sampling from, uses conditional CRP sampler",
         requires("conditional") // cant sample starting from a fixed configuration unless with fixed k
     )]
     initial_configuration: Option<Configuration>,
@@ -214,7 +231,6 @@ impl Opts {
     }
 }
 
-// at alpha = 1 the only possible configuration is (n - k + 1, 1, ..., 1), and past it there is nothing
 fn parse_alpha(s: &str) -> Result<f64, String> {
     let alpha: f64 = s.parse().map_err(|e| format!("{e}"))?;
     if alpha <= 1. {
@@ -262,6 +278,7 @@ fn run_sampler(sampler: &dyn Sampler<Pcg64>, samples: usize, seed: u64, quiet: b
 /// run sampler and test specific configuration
 fn run_test(
     sampler: &dyn Sampler<Pcg64>,
+    tests: &[Box<dyn Test>],
     test_configuration: &Configuration,
     opts: &Opts,
 ) -> Result<()> {
@@ -278,30 +295,20 @@ fn run_test(
         Some(pb)
     };
 
-    // writing this non-generically for now
-    // if MAYBE we make more tests, we can have a
-    // list of "dyn Test"s and go over them
-    let s = SlatkinTest::new(test_configuration);
-    let w = WattersonTest::new(test_configuration);
-
     // replicates in the lower and upper tails of each test,
     // where ties with the observed configuration count in both
-    let mut s_lower: usize = 0;
-    let mut s_upper: usize = 0;
-    let mut w_lower: usize = 0;
-    let mut w_upper: usize = 0;
+    let mut tails = vec![(0usize, 0usize); tests.len()];
 
     for _ in 0..samples {
         let mut samp = sampler.sample(&mut rng);
         // only sort when outputting in ASCII
         samp.sort_unstable();
 
-        let o = s.compare(&samp);
-        s_lower += o.is_le() as usize;
-        s_upper += o.is_ge() as usize;
-        let o = w.compare(&samp);
-        w_lower += o.is_le() as usize;
-        w_upper += o.is_ge() as usize;
+        for (t, (lower, upper)) in tests.iter().zip(&mut tails) {
+            let o = t.compare(&samp);
+            *lower += o.is_le() as usize;
+            *upper += o.is_ge() as usize;
+        }
 
         if let Some(ref pb) = pb {
             pb.inc(1);
@@ -313,38 +320,29 @@ fn run_test(
     }
 
     // the observed configuration is in both of its own tails.
-    // in both tests the lower tail is the even side, so a small p_lower means more even
-    // than expected (anticonformity) and a small p_upper less even (conformity).
-    // reading the upper side off p_lower as 1 - p_lower would leave out the ties
-    let s_plower = (s_lower + 1) as f64 / (samples + 1) as f64;
-    let s_pupper = (s_upper + 1) as f64 / (samples + 1) as f64;
-    let w_plower = (w_lower + 1) as f64 / (samples + 1) as f64;
-    let w_pupper = (w_upper + 1) as f64 / (samples + 1) as f64;
+    let p = |count: usize| (count + 1) as f64 / (samples + 1) as f64;
 
     if opts.json {
+        let results: Vec<_> = tests
+            .iter()
+            .zip(&tails)
+            .map(|(t, &(lower, upper))| {
+                serde_json::json!({
+                    "test": t.name(),
+                    "lower_count": lower,
+                    "upper_count": upper,
+                    "total_count": samples,
+                    "p_lower": p(lower),
+                    "p_upper": p(upper),
+                })
+            })
+            .collect();
         let mut val = serde_json::json!({
             "configuration": test_configuration.to_string(),
             "theta": sampler.theta(),
             "seed": opts.seed,
             "replicates": samples,
-            "tests": [
-               {
-                   "test": s.name(),
-                   "lower_count": s_lower,
-                   "upper_count": s_upper,
-                   "total_count": samples,
-                   "p_lower": s_plower,
-                   "p_upper": s_pupper,
-               },
-               {
-                   "test": w.name(),
-                   "lower_count": w_lower,
-                   "upper_count": w_upper,
-                   "total_count": samples,
-                   "p_lower": w_plower,
-                   "p_upper": w_pupper,
-               }
-            ]
+            "tests": results,
         });
 
         if let Some(val) = val.as_object_mut() {
@@ -381,17 +379,13 @@ fn run_test(
         }
         println!("theta\t{}", sampler.theta());
 
-        println!("{}\tlower_count\t{}", s.name(), s_lower);
-        println!("{}\tupper_count\t{}", s.name(), s_upper);
-        println!("{}\ttotal_count\t{}", s.name(), samples);
-        println!("{}\tp_lower\t{}", s.name(), s_plower);
-        println!("{}\tp_upper\t{}", s.name(), s_pupper);
-
-        println!("{}\tlower_count\t{}", w.name(), w_lower);
-        println!("{}\tupper_count\t{}", w.name(), w_upper);
-        println!("{}\ttotal_count\t{}", w.name(), samples);
-        println!("{}\tp_lower\t{}", w.name(), w_plower);
-        println!("{}\tp_upper\t{}", w.name(), w_pupper);
+        for (t, &(lower, upper)) in tests.iter().zip(&tails) {
+            println!("{}\tlower_count\t{}", t.name(), lower);
+            println!("{}\tupper_count\t{}", t.name(), upper);
+            println!("{}\ttotal_count\t{}", t.name(), samples);
+            println!("{}\tp_lower\t{}", t.name(), p(lower));
+            println!("{}\tp_upper\t{}", t.name(), p(upper));
+        }
     }
     Ok(())
 }

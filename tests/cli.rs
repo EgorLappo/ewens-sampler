@@ -187,7 +187,7 @@ fn test_reports_initial_configuration_and_bias() {
     assert_eq!(v["bias"], 1.3);
 }
 
-// with alpha the test runs under pitman-yor, and reports its theta mle
+// with alpha the test runs under pitman-yor, with its own tests, and reports its theta mle
 #[test]
 fn test_reports_alpha() {
     for alpha in [0.5, -1.0] {
@@ -196,7 +196,23 @@ fn test_reports_alpha() {
         assert_eq!(v["alpha"], alpha);
         assert_eq!(v["theta"], theta_mle(12, 4, alpha, None));
         assert!(v.get("bias").is_none());
+        let tests = v["tests"].as_array().unwrap();
+        let names: Vec<_> = tests.iter().map(|t| t["test"].as_str().unwrap()).collect();
+        assert_eq!(names, ["exact", "score"]);
     }
+}
+
+// at alpha = -1 every configuration is as probable as any other, so the exact test ties
+// everything, while the score still tells them apart
+#[test]
+fn test_exact_ties_everything_at_minus_one() {
+    let v = json(&["--test", "8 1 2 1", "-a", "-1", "-s", "200", "-q", "--json"]);
+    let exact = &v["tests"][0];
+    assert_eq!(exact["test"], "exact");
+    assert_eq!(exact["lower_count"], 200, "{exact}");
+    assert_eq!(exact["upper_count"], 200, "{exact}");
+    let score = &v["tests"][1];
+    assert!(score["lower_count"].as_u64().unwrap() < 200, "{score}");
 }
 
 #[test]
@@ -227,6 +243,15 @@ fn rejects_k_larger_than_n() {
 #[test]
 fn rejects_alpha_above_one() {
     assert!(error(&["-n", "12", "-k", "4", "-a", "1.5", "-q"]).contains("at most 1"));
+}
+
+// the limits can be sampled from, but have nothing to test
+#[test]
+fn rejects_testing_at_the_limits_of_alpha() {
+    for a in ["1", "-inf"] {
+        let e = error(&["--test", "8 1 2 1", "-a", a, "-s", "10", "-q"]);
+        assert!(e.contains("-inf < alpha < 1"), "{e}");
+    }
 }
 
 #[test]

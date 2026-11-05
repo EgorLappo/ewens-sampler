@@ -12,9 +12,7 @@ pub mod pitman_yor;
 //   this would NOT work if we compared actual probabilities with '<'
 
 pub trait Test {
-    type Value;
     fn name(&self) -> &'static str;
-    fn statistic(&self, uconf: &[u16]) -> Self::Value;
     // output ordering to deal with ties and tails tallies in main.rs
     fn compare(&self, tconf: &[u16]) -> Ordering;
 }
