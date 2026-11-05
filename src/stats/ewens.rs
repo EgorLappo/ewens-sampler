@@ -20,7 +20,7 @@ impl Test for SlatkinTest {
     }
 
     #[inline]
-    fn statistic(uconf: &[u16]) -> Self::Value {
+    fn statistic(&self, uconf: &[u16]) -> Self::Value {
         slatkin_statistic(uconf)
     }
 
@@ -71,7 +71,7 @@ impl Test for WattersonTest {
     }
 
     #[inline]
-    fn statistic(uconf: &[u16]) -> Self::Value {
+    fn statistic(&self, uconf: &[u16]) -> Self::Value {
         watterson_statistic(uconf)
     }
 
